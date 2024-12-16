@@ -1,0 +1,4122 @@
+Current Project structure so far is:
+bit2coin/
+├── src/
+│   ├── __init__.py
+│   │
+│   ├── blockchain/
+│   │   ├── __init__.py
+│   │   ├── block.py
+│   │   ├── blockchain.py
+│   │   └── transaction.py
+│   │
+│   ├── consensus/
+│   │   ├── __init__.py
+│   │   ├── proof_of_stake.py
+│   │   └── validator.py
+│   │
+│   ├── crypto/
+│   │   ├── __init__.py
+│   │   ├── hash.py
+│   │   └── signature.py
+│   │
+│   ├── network/
+│   │   ├── __init__.py
+│   │   ├── node.py
+│   │   └── peer_discovery.py
+│   │
+│   ├── storage/
+│   │   ├── __init__.py
+│   │   ├── database.py
+│   │   └── blockchain_state.py
+│   │
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   └── config.py
+│   │
+│   └── wallet/
+│       ├── __init__.py
+│       ├── keys.py
+│       └── wallet.py
+│
+├── tests/
+│   ├── __init__.py
+│   ├── test_blockchain.py
+│   ├── test_consensus.py
+│   ├── test_network.py
+│   ├── test_storage.py
+│   └── test_wallet.py
+│
+├── requirements.txt
+├── pyproject.toml
+├── README.md
+└── main.py
+
+
+
+
+Code snippets are:
+
+#blockchain/_init.py
+from .block import Block
+from .blockchain import Blockchain
+from .transaction import Transaction
+
+__all__ = ['Block', 'Blockchain', 'Transaction']
+
+# src/blockchain/block.py
+from typing import List, Dict, Optional, Set, TYPE_CHECKING
+from dataclasses import dataclass
+import time
+from .transaction import Transaction
+from ..crypto.hash import Hash
+
+# Handle circular imports
+if TYPE_CHECKING:
+    from .blockchain import Blockchain
+    from ..consensus.validator import Validator
+
+@dataclass
+class BlockMetadata:
+    """Metadata for block finality and consensus"""
+    finalized: bool = False
+    validator_signatures: Set[str] = None
+    voting_power: float = 0.0
+    timestamp_verified: bool = False
+    
+    def __post_init__(self):
+        self.validator_signatures = set()
+
+class Block:
+    def __init__(self, index: int, transactions: List[Transaction], 
+                 previous_hash: str, validator: Optional[str] = None, 
+                 timestamp: int = None):
+        self.index = index
+        self.transactions = transactions if transactions is not None else []
+        self.timestamp = timestamp or int(time.time())
+        self.previous_hash = previous_hash
+        self.validator = validator  # Address of validator who created block
+        self.hash = self._calculate_hash()
+        self.metadata = BlockMetadata()
+        
+        # Economic metrics
+        self.total_fees = self._calculate_fees()
+        self.energy_usage = self._calculate_energy_usage()
+        self.size = self._calculate_size()
+        
+    def _calculate_hash(self) -> str:
+        """Calculate block hash using improved method"""
+        block_string = f"{self.index}{self.previous_hash}{self.timestamp}{self.validator}"
+        for tx in self.transactions:
+            block_string += tx.to_string()
+        return Hash.hash_string(block_string)
+
+    def _calculate_fees(self) -> float:
+        """Calculate total transaction fees in block"""
+        return sum(tx.fee for tx in self.transactions if hasattr(tx, 'fee') and tx.fee is not None)
+
+    def _calculate_energy_usage(self) -> float:
+        """Calculate energy usage with improved efficiency metrics"""
+        # Base energy cost for block creation
+        base_cost = 0.5  # Reduced from original
+        # Additional cost per transaction with efficiency scaling
+        tx_count = len(self.transactions)
+        if tx_count > 0:
+            transaction_cost = (tx_count * 0.1) * (0.95 ** (tx_count // 10))  # Efficiency scaling
+        else:
+            transaction_cost = 0
+        # Additional validation cost
+        validation_cost = 0.1 * len(self.metadata.validator_signatures)
+        
+        return max(0.1, base_cost + transaction_cost + validation_cost)
+
+    def _calculate_size(self) -> int:
+        """Calculate block size in bytes"""
+        return (
+            len(str(self.index)) +
+            sum(len(tx.to_string()) for tx in self.transactions) +
+            len(self.previous_hash) +
+            len(str(self.timestamp)) +
+            (len(self.validator) if self.validator else 0)
+        )
+
+    def add_validator_signature(self, validator_address: str, voting_power: float) -> bool:
+        """Add validator signature with voting power"""
+        if validator_address not in self.metadata.validator_signatures:
+            self.metadata.validator_signatures.add(validator_address)
+            self.metadata.voting_power += voting_power
+            return True
+        return False
+
+    def is_finalized(self, required_voting_power: float = 0.66) -> bool:
+        """Check if block is finalized based on voting power"""
+        return self.metadata.voting_power >= required_voting_power
+
+    def validate_block(self, blockchain: 'Blockchain') -> bool:
+        """Comprehensive block validation"""
+        try:
+            # Basic structural validation
+            if not self._validate_structure():
+                return False
+
+            # Validate block size
+            if self.size > blockchain.get_max_block_size():
+                return False
+
+            # Validate timestamp
+            if not self._validate_timestamp(blockchain):
+                return False
+
+            # Validate transactions
+            if not self._validate_transactions(blockchain):
+                return False
+
+            # Validate validator
+            if not self._validate_validator(blockchain):
+                return False
+
+            return True
+        except Exception:
+            return False
+
+    def _validate_structure(self) -> bool:
+        """Validate block structure"""
+        return (
+            isinstance(self.index, int) and
+            isinstance(self.transactions, list) and
+            isinstance(self.timestamp, int) and
+            isinstance(self.previous_hash, str) and
+            len(self.previous_hash) == 64
+        )
+
+    def _validate_timestamp(self, blockchain: 'Blockchain') -> bool:
+        """Validate block timestamp"""
+        if self.timestamp > int(time.time()) + 300:  # Not more than 5 minutes in future
+            return False
+            
+        if self.index > 0:
+            prev_block = blockchain.get_block(self.index - 1)
+            if prev_block and self.timestamp <= prev_block.timestamp:
+                return False
+                
+        self.metadata.timestamp_verified = True
+        return True
+
+    def _validate_transactions(self, blockchain: 'Blockchain') -> bool:
+        """Validate all transactions in block"""
+        for tx in self.transactions:
+            if not tx.verify_transaction(blockchain):
+                return False
+        return True
+
+    def _validate_validator(self, blockchain: 'Blockchain') -> bool:
+        """Validate block validator"""
+        if not self.validator:
+            return False
+            
+        validator = blockchain.get_validator(self.validator)
+        return validator is not None and validator.is_active
+
+    def to_dict(self) -> Dict:
+        """Convert block to dictionary with enhanced metadata"""
+        return {
+            "index": self.index,
+            "transactions": [tx.to_dict() for tx in self.transactions],
+            "timestamp": self.timestamp,
+            "previous_hash": self.previous_hash,
+            "validator": self.validator,
+            "hash": self.hash,
+            "metadata": {
+                "finalized": self.metadata.finalized,
+                "validator_signatures": list(self.metadata.validator_signatures),
+                "voting_power": self.metadata.voting_power,
+                "timestamp_verified": self.metadata.timestamp_verified
+            },
+            "economics": {
+                "total_fees": self.total_fees,
+                "energy_usage": self.energy_usage,
+                "size": self.size
+            }
+        }
+
+    def get_efficiency_metrics(self) -> Dict:
+        """Get enhanced block efficiency metrics"""
+        tx_count = len(self.transactions)
+        return {
+            "transactions_per_energy": tx_count / self.energy_usage if self.energy_usage > 0 else 0,
+            "energy_per_transaction": self.energy_usage / tx_count if tx_count > 0 else 0,
+            "fees_per_transaction": self.total_fees / tx_count if tx_count > 0 else 0,
+            "bytes_per_transaction": self.size / tx_count if tx_count > 0 else 0,
+            "total_energy": self.energy_usage,
+            "total_size": self.size,
+            "validation_power": self.metadata.voting_power
+        }
+
+ # src/blockchain/blockchain.py
+from typing import List, Dict, Optional, Tuple
+from collections import defaultdict
+import time
+from .block import Block
+from .transaction import Transaction
+from ..consensus.proof_of_stake import ProofOfStake
+from ..utils.config import Config
+
+class Blockchain:
+    def __init__(self, pos_consensus: ProofOfStake):
+        self.chain: List[Block] = []
+        self.fork_chains: Dict[str, List[Block]] = {}  # Alternative chains
+        self.pos_consensus = pos_consensus
+        self.mempool: Dict[str, Transaction] = {}
+        self.finalized_height = 0
+        self.total_supply = 0
+        self.state: Dict[str, float] = defaultdict(float)
+        self._create_genesis_block()
+        
+    def _create_genesis_block(self):
+        """Create the genesis block with initial validator set"""
+        genesis_transactions = self._create_genesis_transactions()
+        genesis_block = Block(
+            index=0,
+            transactions=genesis_transactions,
+            previous_hash="0" * 64,
+            validator=None,  # Genesis block has no validator
+            timestamp=int(time.time())
+        )
+        self.chain.append(genesis_block)
+        self._apply_block_state(genesis_block)
+        self.finalized_height = 0
+
+    def _create_genesis_transactions(self) -> List[Transaction]:
+        """Create initial distribution transactions"""
+        initial_distribution = Config.INITIAL_DISTRIBUTION
+        transactions = []
+        total_supply = 0
+        
+        for address, amount in initial_distribution.items():
+            tx = Transaction(
+                sender="genesis",
+                recipient=address,
+                amount=amount,
+                timestamp=int(time.time())
+            )
+            transactions.append(tx)
+            total_supply += amount
+            
+        self.total_supply = total_supply
+        return transactions
+
+    def add_block(self, block: Block, validate: bool = True) -> bool:
+        """Add a new block with finality and fork handling"""
+        try:
+            # Save current state for potential rollback
+            state_snapshot = self._take_state_snapshot()
+            
+            # Validate block if required
+            if validate and not self._validate_block(block):
+                return False
+
+            # Check if block builds on current chain
+            if block.previous_hash == self.chain[-1].hash:
+                return self._append_block(block)
+            
+            # Handle potential fork
+            return self._handle_fork(block)
+            
+        except Exception as e:
+            self._restore_state_snapshot(state_snapshot)
+            return False
+
+    def _validate_block(self, block: Block) -> bool:
+        """Comprehensive block validation"""
+        # Basic validation
+        if not block.validate_block(self):
+            return False
+            
+        # Consensus validation
+        validator = self.pos_consensus.get_validator(block.validator)
+        if not validator or not validator.is_active:
+            return False
+            
+        # Transaction validation
+        if not self._validate_block_transactions(block):
+            return False
+            
+        return True
+
+    def _validate_block_transactions(self, block: Block) -> bool:
+        """Validate all transactions in a block"""
+        temp_state = self.state.copy()
+        
+        for tx in block.transactions:
+            if not self._validate_and_apply_transaction(tx, temp_state):
+                return False
+                
+        return True
+
+    def _append_block(self, block: Block) -> bool:
+        """Append block to main chain"""
+        self.chain.append(block)
+        self._apply_block_state(block)
+        
+        # Update finality
+        if self._check_block_finality(block):
+            self.finalized_height = block.index
+            
+        # Clean up mempool
+        self._remove_block_transactions_from_mempool(block)
+        
+        return True
+
+    def _handle_fork(self, block: Block) -> bool:
+        """Handle chain fork"""
+        # Find fork point
+        fork_point = self._find_fork_point(block)
+        if fork_point is None:
+            return False
+            
+        # Create or update fork chain
+        fork_chain = self._create_fork_chain(block, fork_point)
+        if not fork_chain:
+            return False
+            
+        # Check if fork should become main chain
+        if self._should_switch_to_fork(fork_chain):
+            return self._switch_to_fork(fork_chain)
+            
+        # Store fork for potential future use
+        self.fork_chains[block.hash] = fork_chain
+        return True
+
+    def _check_block_finality(self, block: Block) -> bool:
+        """Check if block has reached finality"""
+        voting_power = sum(
+            self.pos_consensus.get_validator(addr).stake
+            for addr in block.metadata.validator_signatures
+        )
+        return voting_power >= self.pos_consensus.total_stake * 2/3
+
+    def _find_fork_point(self, block: Block) -> Optional[int]:
+        """Find the point where chain forked"""
+        for i in range(len(self.chain) - 1, -1, -1):
+            if self.chain[i].hash == block.previous_hash:
+                return i
+        return None
+
+    def _should_switch_to_fork(self, fork_chain: List[Block]) -> bool:
+        """Determine if fork chain should become main chain"""
+        if len(fork_chain) <= len(self.chain):
+            return False
+            
+        fork_stake = self._calculate_chain_stake(fork_chain)
+        main_stake = self._calculate_chain_stake(self.chain)
+        
+        return fork_stake > main_stake
+
+    def _calculate_chain_stake(self, chain: List[Block]) -> float:
+        """Calculate total stake behind a chain"""
+        total_stake = 0
+        for block in chain[-100:]:  # Consider last 100 blocks
+            validator = self.pos_consensus.get_validator(block.validator)
+            if validator:
+                total_stake += validator.stake
+        return total_stake
+
+    def _switch_to_fork(self, fork_chain: List[Block]) -> bool:
+        """Switch main chain to fork"""
+        try:
+            # Reset state to fork point
+            fork_point = self._find_fork_point(fork_chain[0])
+            self._reset_state_to_height(fork_point)
+            
+            # Apply fork chain blocks
+            for block in fork_chain:
+                if not self._append_block(block):
+                    return False
+                    
+            return True
+            
+        except Exception:
+            return False
+
+    def add_transaction_to_mempool(self, transaction: Transaction) -> bool:
+        """Add transaction to mempool with validation"""
+        if not transaction.verify_transaction(self):
+            return False
+            
+        if len(self.mempool) >= Config.MAX_MEMPOOL_SIZE:
+            self._clean_mempool()
+            
+        self.mempool[transaction.transaction_id] = transaction
+        return True
+
+    def get_transactions_for_block(self, max_size: int) -> List[Transaction]:
+        """Get transactions for new block creation"""
+        selected_transactions = []
+        current_size = 0
+        
+        # Sort by fee per byte
+        sorted_transactions = sorted(
+            self.mempool.values(),
+            key=lambda tx: tx.fee / len(tx.to_string()),
+            reverse=True
+        )
+        
+        for tx in sorted_transactions:
+            tx_size = len(tx.to_string())
+            if current_size + tx_size <= max_size:
+                selected_transactions.append(tx)
+                current_size += tx_size
+                
+        return selected_transactions
+
+    def get_balance(self, address: str) -> float:
+        """Get account balance"""
+        return self.state.get(address, 0.0)
+
+    def get_validator_set(self) -> Dict[str, float]:
+        """Get current validator set with stakes"""
+        return {
+            addr: validator.stake
+            for addr, validator in self.pos_consensus.validators.items()
+            if validator.is_active
+        }
+
+    def get_chain_metrics(self) -> Dict:
+        """Get comprehensive chain metrics"""
+        return {
+            "height": len(self.chain) - 1,
+            "finalized_height": self.finalized_height,
+            "total_transactions": sum(len(block.transactions) for block in self.chain),
+            "total_supply": self.total_supply,
+            "active_validators": len(self.get_validator_set()),
+            "fork_count": len(self.fork_chains),
+            "mempool_size": len(self.mempool),
+            "average_block_time": self._calculate_average_block_time(),
+            "total_staked": self.pos_consensus.total_stake
+        }
+
+    def _calculate_average_block_time(self) -> float:
+        """Calculate average block time over last 100 blocks"""
+        if len(self.chain) < 2:
+            return 0
+            
+        recent_blocks = self.chain[-101:]
+        times = [b.timestamp for b in recent_blocks]
+        differences = [t2 - t1 for t1, t2 in zip(times[:-1], times[1:])]
+        
+        return sum(differences) / len(differences)
+
+# src/blockchain/mempool.py
+# Mempool Management System
+# Handles transaction queuing, validation, and block candidate creation
+# Manages memory pool of unconfirmed transactions
+
+from typing import Dict, List, Optional, Set, TYPE_CHECKING
+from dataclasses import dataclass
+from decimal import Decimal
+import time
+import heapq
+from .transaction import Transaction
+from ..utils.config import Config
+
+# Handle circular import
+if TYPE_CHECKING:
+    from .blockchain import Blockchain
+
+@dataclass
+class MempoolTransaction:
+    """Wrapper for transactions in mempool"""
+    transaction: Transaction
+    timestamp: int
+    fee_per_byte: Decimal
+    size: int
+    ancestors: Set[str]  # Transaction IDs of ancestors
+    descendants: Set[str]  # Transaction IDs of descendants
+
+    def __lt__(self, other):
+        """Compare transactions for heap ordering"""
+        return self.fee_per_byte > other.fee_per_byte  # Higher fee first
+
+class Mempool:
+    def __init__(self, max_size_bytes: int = Config.MAX_MEMPOOL_SIZE):
+        self.transactions: Dict[str, MempoolTransaction] = {}
+        self.max_size_bytes = max_size_bytes
+        self.current_size_bytes = 0
+        
+        # Indexes for efficient querying
+        self.address_index: Dict[str, Set[str]] = {}  # address -> tx_ids
+        self.fee_index: List[MempoolTransaction] = []  # Heap of transactions by fee
+        
+        # Transaction dependency tracking
+        self.depends_on: Dict[str, Set[str]] = {}  # tx_id -> parent_tx_ids
+        self.dependent: Dict[str, Set[str]] = {}  # tx_id -> child_tx_ids
+
+    def add_transaction(self, transaction: Transaction, blockchain: 'Blockchain') -> bool:
+        """Add transaction to mempool"""
+        try:
+            # Basic validation
+            if not self._validate_transaction(transaction, blockchain):
+                return False
+
+            # Check if transaction already exists
+            if transaction.transaction_id in self.transactions:
+                return False
+
+            # Calculate transaction metrics
+            tx_size = len(transaction.to_string())
+            fee_per_byte = (transaction.fee or 0) / tx_size if tx_size > 0 else 0
+
+            # Create mempool transaction
+            mempool_tx = MempoolTransaction(
+                transaction=transaction,
+                timestamp=int(time.time()),
+                fee_per_byte=fee_per_byte,
+                size=tx_size,
+                ancestors=set(),
+                descendants=set()
+            )
+
+            # Check size limits and evict if necessary
+            if self.current_size_bytes + tx_size > self.max_size_bytes:
+                self._evict_transactions(tx_size)
+
+            # Add transaction
+            self.transactions[transaction.transaction_id] = mempool_tx
+            self.current_size_bytes += tx_size
+
+            # Update indexes
+            self._update_address_index(transaction)
+            heapq.heappush(self.fee_index, mempool_tx)
+
+            # Update dependency graphs
+            self._update_dependencies(transaction)
+
+            return True
+        except Exception:
+            return False
+
+    def get_transactions_for_block(self, max_size: int, max_count: int) -> List[Transaction]:
+        """Get transactions for new block creation"""
+        selected_transactions = []
+        selected_size = 0
+        used_txs = set()
+
+        try:
+            # Create a copy of fee index for selection
+            candidates = self.fee_index.copy()
+            heapq.heapify(candidates)
+
+            while candidates and len(selected_transactions) < max_count:
+                tx_wrapper = heapq.heappop(candidates)
+                tx = tx_wrapper.transaction
+                
+                # Skip if already selected
+                if tx.transaction_id in used_txs:
+                    continue
+
+                # Check if all ancestors are included
+                if not self._check_ancestors_included(tx.transaction_id, used_txs):
+                    continue
+
+                # Check size limit
+                if selected_size + tx_wrapper.size > max_size:
+                    continue
+
+                # Add transaction
+                selected_transactions.append(tx)
+                selected_size += tx_wrapper.size
+                used_txs.add(tx.transaction_id)
+
+            return selected_transactions
+        except Exception:
+            return []
+
+    def remove_transactions(self, transactions: List[Transaction]):
+        """Remove transactions from mempool"""
+        for tx in transactions:
+            self._remove_transaction(tx.transaction_id)
+
+    def _remove_transaction(self, tx_id: str):
+        """Remove a single transaction"""
+        if tx_id not in self.transactions:
+            return
+
+        try:
+            tx_wrapper = self.transactions[tx_id]
+            
+            # Update size tracking
+            self.current_size_bytes -= tx_wrapper.size
+
+            # Remove from indexes
+            self._remove_from_address_index(tx_wrapper.transaction)
+            self.fee_index = [tx for tx in self.fee_index 
+                            if tx.transaction.transaction_id != tx_id]
+            heapq.heapify(self.fee_index)
+
+            # Update dependency tracking
+            self._remove_dependencies(tx_id)
+
+            # Remove transaction
+            del self.transactions[tx_id]
+        except Exception:
+            pass
+
+    def _validate_transaction(self, transaction: Transaction, blockchain: 'Blockchain') -> bool:
+        """Validate transaction for mempool acceptance"""
+        try:
+            # Basic transaction validation
+            if not transaction.verify_transaction(blockchain):
+                return False
+
+            # Check minimum fee
+            if (transaction.fee or 0) < Config.MIN_TRANSACTION_FEE:
+                return False
+
+            # Check transaction size
+            if len(transaction.to_string()) > Config.MAX_TRANSACTION_SIZE:
+                return False
+
+            # Check if sender has any conflicting transactions
+            if self._has_conflicting_transactions(transaction, blockchain):
+                return False
+
+            return True
+        except Exception:
+            return False
+
+    def _has_conflicting_transactions(self, transaction: Transaction, blockchain: 'Blockchain') -> bool:
+        """Check for conflicting transactions from same sender"""
+        try:
+            if transaction.sender not in self.address_index:
+                return False
+
+            # Get current balance from blockchain
+            sender_balance = blockchain.get_balance(transaction.sender)
+            sender_txs = self.address_index[transaction.sender]
+            total_spend = Decimal('0')
+
+            for tx_id in sender_txs:
+                tx = self.transactions[tx_id].transaction
+                total_spend += tx.amount + (tx.fee or 0)
+
+            # Check if total spend would exceed balance
+            return total_spend + transaction.amount + (transaction.fee or 0) > sender_balance
+        except Exception:
+            return True  # If there's any error, treat as conflicting for safety
+
+    def _update_address_index(self, transaction: Transaction):
+        """Update address index with new transaction"""
+        for address in [transaction.sender, transaction.recipient]:
+            if address not in self.address_index:
+                self.address_index[address] = set()
+            self.address_index[address].add(transaction.transaction_id)
+
+    def _remove_from_address_index(self, transaction: Transaction):
+        """Remove transaction from address index"""
+        for address in [transaction.sender, transaction.recipient]:
+            if address in self.address_index:
+                self.address_index[address].discard(transaction.transaction_id)
+                if not self.address_index[address]:
+                    del self.address_index[address]
+
+    def _update_dependencies(self, transaction: Transaction):
+        """Update transaction dependency tracking"""
+        if not hasattr(transaction, 'parent_transactions'):
+            return
+
+        tx_id = transaction.transaction_id
+        parent_ids = {tx.transaction_id for tx in transaction.parent_transactions}
+
+        # Update depends_on
+        self.depends_on[tx_id] = parent_ids
+
+        # Update dependent
+        for parent_id in parent_ids:
+            if parent_id not in self.dependent:
+                self.dependent[parent_id] = set()
+            self.dependent[parent_id].add(tx_id)
+
+    def _remove_dependencies(self, tx_id: str):
+        """Remove transaction from dependency tracking"""
+        # Remove from depends_on
+        if tx_id in self.depends_on:
+            for parent_id in self.depends_on[tx_id]:
+                if parent_id in self.dependent:
+                    self.dependent[parent_id].discard(tx_id)
+            del self.depends_on[tx_id]
+
+        # Remove from dependent
+        if tx_id in self.dependent:
+            for child_id in self.dependent[tx_id]:
+                if child_id in self.depends_on:
+                    self.depends_on[child_id].discard(tx_id)
+            del self.dependent[tx_id]
+
+    def _check_ancestors_included(self, tx_id: str, included_txs: Set[str]) -> bool:
+        """Check if all ancestors of a transaction are included"""
+        if tx_id not in self.depends_on:
+            return True
+
+        return all(parent_id in included_txs for parent_id in self.depends_on[tx_id])
+
+    def _evict_transactions(self, required_size: int):
+        """Evict low-fee transactions to make space"""
+        while (self.current_size_bytes + required_size > self.max_size_bytes and 
+               self.fee_index):
+            # Remove lowest fee transaction
+            lowest_fee_tx = heapq.nlargest(1, self.fee_index)[0]
+            self._remove_transaction(lowest_fee_tx.transaction.transaction_id)
+
+    def get_mempool_metrics(self) -> Dict:
+        """Get mempool metrics"""
+        return {
+            "transaction_count": len(self.transactions),
+            "size_bytes": self.current_size_bytes,
+            "max_size_bytes": self.max_size_bytes,
+            "usage_percentage": (self.current_size_bytes / self.max_size_bytes) * 100,
+            "fee_statistics": self._calculate_fee_statistics(),
+            "address_statistics": self._calculate_address_statistics(),
+            "dependency_metrics": self._calculate_dependency_metrics()
+        }
+
+    def _calculate_fee_statistics(self) -> Dict:
+        """Calculate fee statistics"""
+        if not self.fee_index:
+            return {
+                "min_fee_per_byte": 0,
+                "max_fee_per_byte": 0,
+                "avg_fee_per_byte": 0,
+                "median_fee_per_byte": 0
+            }
+
+        fees_per_byte = [float(tx.fee_per_byte) for tx in self.fee_index]
+        sorted_fees = sorted(fees_per_byte)
+        median_fee = sorted_fees[len(sorted_fees) // 2]
+
+        return {
+            "min_fee_per_byte": float(min(fees_per_byte)),
+            "max_fee_per_byte": float(max(fees_per_byte)),
+            "avg_fee_per_byte": float(sum(fees_per_byte) / len(fees_per_byte)),
+            "median_fee_per_byte": float(median_fee)
+        }
+
+    def _calculate_address_statistics(self) -> Dict:
+        """Calculate address statistics"""
+        if not self.address_index:
+            return {
+                "unique_addresses": 0,
+                "max_transactions_per_address": 0,
+                "avg_transactions_per_address": 0
+            }
+
+        tx_counts = [len(txs) for txs in self.address_index.values()]
+        return {
+            "unique_addresses": len(self.address_index),
+            "max_transactions_per_address": max(tx_counts, default=0),
+            "avg_transactions_per_address": sum(tx_counts) / len(tx_counts) if tx_counts else 0
+        }
+
+    def _calculate_dependency_metrics(self) -> Dict:
+        """Calculate dependency metrics"""
+        if not self.depends_on:
+            return {
+                "transactions_with_dependencies": 0,
+                "max_dependency_chain": 0,
+                "avg_dependencies_per_tx": 0
+            }
+
+        dependency_counts = [len(deps) for deps in self.depends_on.values()]
+        return {
+            "transactions_with_dependencies": len(self.depends_on),
+            "max_dependency_chain": self._get_max_dependency_chain(),
+            "avg_dependencies_per_tx": (
+                sum(dependency_counts) / len(dependency_counts) if dependency_counts else 0
+            )
+        }
+
+    def _get_max_dependency_chain(self) -> int:
+        """Calculate maximum dependency chain length"""
+        max_chain = 0
+        visited = set()
+
+        def get_chain_length(tx_id: str, current_length: int) -> int:
+            if tx_id in visited:
+                return current_length
+            visited.add(tx_id)
+            if tx_id not in self.depends_on:
+                return current_length
+            return max(
+                get_chain_length(dep_id, current_length + 1)
+                for dep_id in self.depends_on[tx_id]
+            )
+
+        for tx_id in self.transactions:
+            chain_length = get_chain_length(tx_id, 0)
+            max_chain = max(max_chain, chain_length)
+
+        return max_chain
+
+# src/blockchain/transaction.py
+from typing import Optional, Dict, Union, TYPE_CHECKING
+import time
+import hashlib
+from dataclasses import dataclass
+from enum import Enum
+from ..crypto.signature import SignatureManager
+from ..utils.config import Config
+
+if TYPE_CHECKING:
+    from .blockchain import Blockchain
+
+class TransactionType(Enum):
+    TRANSFER = "transfer"
+    STAKE = "stake"
+    UNSTAKE = "unstake"
+    DELEGATE = "delegate"
+    UNDELEGATE = "undelegate"
+    CLAIM_REWARDS = "claim_rewards"
+
+@dataclass
+class TransactionData:
+    """Additional transaction data for special transaction types"""
+    type: TransactionType
+    validator_address: Optional[str] = None
+    delegation_amount: Optional[float] = None
+    reward_share: Optional[float] = None
+    unbonding_time: Optional[int] = None
+
+class Transaction:
+    def __init__(self, sender: str, recipient: str, amount: float, 
+                 transaction_type: TransactionType = TransactionType.TRANSFER,
+                 data: Optional[Dict] = None, timestamp: Optional[int] = None,
+                 gas_limit: int = 21000):
+        self.sender = sender
+        self.recipient = recipient
+        self.amount = float(amount)
+        self.transaction_type = transaction_type
+        self.data = TransactionData(**data) if data else None
+        self.timestamp = timestamp or int(time.time())
+        self.gas_limit = gas_limit
+        self.gas_price = self._calculate_gas_price()
+        self.nonce = 0  # Will be set during validation
+        
+        # Will be set later
+        self.signature: Optional[str] = None
+        self.transaction_id = self._generate_id()
+        self.gas_used: Optional[int] = None
+        self.fee: Optional[float] = None
+
+    def _generate_id(self) -> str:
+        """Generate unique transaction ID"""
+        data = (
+            f"{self.sender}{self.recipient}{self.amount}"
+            f"{self.timestamp}{self.transaction_type.value}"
+        )
+        if self.data:
+            data += str(self.data.__dict__)
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    def _calculate_gas_price(self) -> int:
+        """Calculate gas price based on network conditions"""
+        base_price = Config.BASE_GAS_PRICE
+        # Add logic for dynamic gas price based on network congestion
+        return base_price
+
+    def set_signature(self, signature: str):
+        """Set transaction signature"""
+        self.signature = signature
+
+    def verify_signature(self, public_key: str) -> bool:
+        """Verify transaction signature"""
+        if self.sender == "genesis":
+            return True
+            
+        if not self.signature:
+            return False
+            
+        message = self.to_string()
+        return SignatureManager.verify_data(message, self.signature, public_key)
+
+    def verify_transaction(self, blockchain: 'Blockchain') -> bool:
+        """Comprehensive transaction verification"""
+        try:
+            # Basic validation
+            if not self._verify_basic_fields():
+                return False
+
+            # Verify transaction type specific rules
+            if not self._verify_transaction_type(blockchain):
+                return False
+
+            # Verify sender has sufficient balance
+            if not self._verify_balance(blockchain):
+                return False
+
+            # Calculate and verify gas costs
+            self.gas_used = self._calculate_gas_used()
+            self.fee = self.gas_used * self.gas_price
+            
+            if not self._verify_gas_payment(blockchain):
+                return False
+
+            return True
+
+        except Exception:
+            return False
+
+    def _verify_basic_fields(self) -> bool:
+        """Verify basic transaction fields"""
+        return (
+            isinstance(self.sender, str) and
+            isinstance(self.recipient, str) and
+            isinstance(self.amount, (int, float)) and
+            self.amount >= 0 and
+            isinstance(self.timestamp, int) and
+            self.timestamp <= int(time.time()) + 300  # Not more than 5 mins in future
+        )
+
+    def _verify_transaction_type(self, blockchain: 'Blockchain') -> bool:
+        """Verify transaction based on its type"""
+        if self.transaction_type == TransactionType.TRANSFER:
+            return True
+            
+        elif self.transaction_type == TransactionType.STAKE:
+            return self._verify_stake_transaction(blockchain)
+            
+        elif self.transaction_type == TransactionType.DELEGATE:
+            return self._verify_delegation_transaction(blockchain)
+            
+        elif self.transaction_type == TransactionType.CLAIM_REWARDS:
+            return self._verify_reward_claim(blockchain)
+            
+        return False
+
+    def _verify_stake_transaction(self, blockchain: 'Blockchain') -> bool:
+        """Verify staking transaction"""
+        if not self.data or not self.data.validator_address:
+            return False
+            
+        # Check minimum stake amount
+        if self.amount < Config.MINIMUM_STAKE:
+            return False
+            
+        # Verify validator exists
+        validator = blockchain.pos_consensus.get_validator(self.data.validator_address)
+        return validator is not None
+
+    def _verify_delegation_transaction(self, blockchain: 'Blockchain') -> bool:
+        """Verify delegation transaction"""
+        if not self.data or not self.data.validator_address:
+            return False
+            
+        # Check minimum delegation amount
+        if self.amount < Config.MINIMUM_DELEGATION:
+            return False
+            
+        # Verify validator exists and is active
+        validator = blockchain.pos_consensus.get_validator(self.data.validator_address)
+        if not validator or not validator.is_active:
+            return False
+            
+        return True
+
+    def _verify_reward_claim(self, blockchain: 'Blockchain') -> bool:
+        """Verify reward claim transaction"""
+        if self.amount > 0:
+            return False
+            
+        # Check if sender has unclaimed rewards
+        unclaimed_rewards = blockchain.get_unclaimed_rewards(self.sender)
+        return unclaimed_rewards > 0
+
+    def _verify_balance(self, blockchain: 'Blockchain') -> bool:
+        """Verify sender has sufficient balance"""
+        if self.sender == "genesis":
+            return True
+            
+        sender_balance = blockchain.get_balance(self.sender)
+        total_cost = self.amount + (self.gas_limit * self.gas_price)
+        
+        return sender_balance >= total_cost
+
+    def _verify_gas_payment(self, blockchain: 'Blockchain') -> bool:
+        """Verify gas payment is valid"""
+        if self.gas_used > self.gas_limit:
+            return False
+            
+        if self.sender == "genesis":
+            return True
+            
+        gas_cost = self.gas_used * self.gas_price
+        sender_balance = blockchain.get_balance(self.sender)
+        
+        return sender_balance >= (self.amount + gas_cost)
+
+    def _calculate_gas_used(self) -> int:
+        """Calculate gas used by transaction"""
+        base_gas = 21000  # Base gas for transfer
+        
+        # Additional gas for data
+        data_gas = 0
+        if self.data:
+            data_string = str(self.data.__dict__)
+            data_gas = len(data_string) * 68  # 68 gas per non-zero byte
+            
+        # Additional gas based on transaction type
+        type_gas = {
+            TransactionType.TRANSFER: 0,
+            TransactionType.STAKE: 32000,
+            TransactionType.UNSTAKE: 32000,
+            TransactionType.DELEGATE: 40000,
+            TransactionType.UNDELEGATE: 40000,
+            TransactionType.CLAIM_REWARDS: 24000
+        }.get(self.transaction_type, 0)
+        
+        return base_gas + data_gas + type_gas
+
+    def to_dict(self) -> Dict:
+        """Convert transaction to dictionary"""
+        return {
+            "transaction_id": self.transaction_id,
+            "sender": self.sender,
+            "recipient": self.recipient,
+            "amount": self.amount,
+            "timestamp": self.timestamp,
+            "type": self.transaction_type.value,
+            "data": self.data.__dict__ if self.data else None,
+            "gas_limit": self.gas_limit,
+            "gas_price": self.gas_price,
+            "gas_used": self.gas_used,
+            "fee": self.fee,
+            "nonce": self.nonce,
+            "signature": self.signature
+        }
+
+    def to_string(self) -> str:
+        """Convert transaction to string for signing"""
+        return (
+            f"{self.sender}{self.recipient}{self.amount}"
+            f"{self.timestamp}{self.transaction_type.value}"
+            f"{str(self.data.__dict__) if self.data else ''}"
+            f"{self.gas_limit}{self.gas_price}{self.nonce}"
+        )
+
+# src/cli/cli.py
+import argparse
+import sys
+from typing import List
+from ..blockchain.blockchain import Blockchain
+from ..wallet.wallet import Wallet
+from ..network.node import Node
+from ..consensus.proof_of_stake import ProofOfStake
+
+class CLI:
+    def __init__(self):
+        self.blockchain = Blockchain()
+        self.wallet = None
+        self.node = None
+        self.pos = ProofOfStake()
+
+    def main(self, args: List[str]):
+        parser = self.create_parser()
+        args = parser.parse_args(args)
+        
+        if not hasattr(args, 'func'):
+            parser.print_help()
+            return
+            
+        args.func(args)
+
+    def create_parser(self) -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser(description='bit2coin CLI')
+        subparsers = parser.add_subparsers(title='commands', dest='command')
+
+        # Wallet commands
+        wallet_parser = subparsers.add_parser('wallet', help='Wallet operations')
+        wallet_subparsers = wallet_parser.add_subparsers()
+
+        create_wallet = wallet_subparsers.add_parser('create', help='Create new wallet')
+        create_wallet.set_defaults(func=self.create_wallet)
+
+        balance = wallet_subparsers.add_parser('balance', help='Get wallet balance')
+        balance.add_argument('address', help='Wallet address')
+        balance.set_defaults(func=self.get_balance)
+
+        # Node commands
+        node_parser = subparsers.add_parser('node', help='Node operations')
+        node_subparsers = node_parser.add_subparsers()
+
+        start_node = node_subparsers.add_parser('start', help='Start a node')
+        start_node.add_argument('--host', default='127.0.0.1', help='Node host')
+        start_node.add_argument('--port', type=int, default=5000, help='Node port')
+        start_node.set_defaults(func=self.start_node)
+
+        # Transaction commands
+        tx_parser = subparsers.add_parser('tx', help='Transaction operations')
+        tx_subparsers = tx_parser.add_subparsers()
+
+        send_tx = tx_subparsers.add_parser('send', help='Send transaction')
+        send_tx.add_argument('recipient', help='Recipient address')
+        send_tx.add_argument('amount', type=float, help='Amount to send')
+        send_tx.set_defaults(func=self.send_transaction)
+
+        return parser
+
+    def create_wallet(self, args):
+        self.wallet = Wallet()
+        print(f"Created new wallet")
+        print(f"Address: {self.wallet.address}")
+        print(f"Private key: {self.wallet.keypair.export_private_key()}")
+
+    def get_balance(self, args):
+        balance = self.blockchain.get_balance(args.address)
+        print(f"Balance for {args.address}: {balance}")
+
+    def start_node(self, args):
+        self.node = Node(args.host, args.port, self.blockchain)
+        print(f"Started node at {args.host}:{args.port}")
+        self.node.start()
+
+    def send_transaction(self, args):
+        if not self.wallet:
+            print("Error: No wallet loaded. Create or load a wallet first.")
+            return
+        
+        tx = self.wallet.create_transaction(args.recipient, args.amount)
+        if tx:
+            if self.node:
+                self.node.broadcast_transaction(tx)
+            print(f"Transaction sent: {tx.transaction_id}")
+        else:
+            print("Error creating transaction. Check balance and parameters.")
+
+def main():
+    cli = CLI()
+    cli.main(sys.argv[1:])
+
+if __name__ == "__main__":
+    main()
+
+#consensus/_init_.py
+from .proof_of_stake import ProofOfStake
+from .validator import Validator
+
+__all__ = ['ProofOfStake', 'Validator']            
+
+# src/consensus/proof_of_stake.py
+# Complete Proof of Stake consensus mechanism
+# Handles validator management, delegation, rewards, slashing, and block production
+# Core consensus engine for the PoS blockchain
+
+from typing import Dict, List, Optional, Tuple, Set
+from dataclasses import dataclass
+import random
+import time
+from decimal import Decimal, ROUND_DOWN
+from .validator import Validator
+from ..blockchain.block import Block
+from ..blockchain.transaction import Transaction, TransactionType
+from ..utils.config import Config
+from ..crypto.hash import Hash
+
+@dataclass
+class DelegationInfo:
+    """Tracks delegation information"""
+    validator_address: str
+    delegator_address: str
+    amount: Decimal
+    reward_share: Decimal  # Percentage of rewards shared with delegator
+    start_time: int
+    unbonding_time: Optional[int] = None
+    is_active: bool = True
+
+@dataclass
+class SlashingEvent:
+    """Records slashing events"""
+    validator_address: str
+    reason: str
+    amount: Decimal
+    timestamp: int
+    block_height: int
+
+@dataclass
+class ValidatorReward:
+    """Tracks validator rewards"""
+    amount: Decimal
+    block_height: int
+    timestamp: int
+    claimed: bool = False
+
+class ProofOfStake:
+    def __init__(self):
+        # Core state
+        self.validators: Dict[str, Validator] = {}
+        self.total_stake: Decimal = Decimal('0')
+        self.min_stake = Decimal(str(Config.MINIMUM_STAKE))
+        self.max_validators = Config.MAX_VALIDATORS
+        
+        # Delegation tracking
+        self.delegations: Dict[str, List[DelegationInfo]] = {}  # validator -> delegations
+        self.delegator_info: Dict[str, Set[str]] = {}  # delegator -> validators
+        
+        # Rewards tracking
+        self.validator_rewards: Dict[str, List[ValidatorReward]] = {}
+        self.delegator_rewards: Dict[str, Dict[str, Decimal]] = {}  # delegator -> (validator -> amount)
+        
+        # Slashing tracking
+        self.slashing_history: List[SlashingEvent] = []
+        self.slashing_window = Config.SLASHING_WINDOW  # number of blocks to track
+        self.slashing_penalties = {
+            "double_sign": Decimal('0.10'),    # 10% stake slash
+            "downtime": Decimal('0.01'),       # 1% stake slash
+            "malicious": Decimal('0.50')       # 50% stake slash
+        }
+        
+        # Consensus metrics
+        self.last_finalized_height = 0
+        self.current_epoch = 0
+        self.epoch_length = Config.EPOCH_LENGTH
+        self.validator_set_changes: Dict[int, Set[str]] = {}  # epoch -> changed validators
+        
+        # Performance tracking
+        self.validator_performance: Dict[str, Dict] = {}  # validator -> metrics
+        self.missed_blocks: Dict[str, int] = {}  # validator -> count
+        
+        # Initialize genesis validators if provided
+        self._initialize_genesis_validators()
+
+    def _initialize_genesis_validators(self):
+        """Initialize genesis validators from config"""
+        for address, stake in Config.GENESIS_VALIDATORS.items():
+            validator = Validator(
+                address=address,
+                stake=Decimal(str(stake)),
+                start_epoch=0
+            )
+            self.validators[address] = validator
+            self.total_stake += validator.stake
+            self.validator_performance[address] = {
+                "blocks_proposed": 0,
+                "blocks_signed": 0,
+                "missed_blocks": 0,
+                "last_active": int(time.time())
+            }
+
+    def register_validator(self, validator: Validator) -> bool:
+        """Register a new validator"""
+        # Basic validation
+        if (validator.stake < self.min_stake or 
+            len(self.validators) >= self.max_validators or
+            validator.address in self.validators):
+            return False
+
+        # Check for recent slashing events
+        if self._has_recent_slashing(validator.address):
+            return False
+
+        # Add validator
+        self.validators[validator.address] = validator
+        self.total_stake += validator.stake
+        
+        # Initialize tracking
+        self.validator_performance[validator.address] = {
+            "blocks_proposed": 0,
+            "blocks_signed": 0,
+            "missed_blocks": 0,
+            "last_active": int(time.time())
+        }
+        self.validator_rewards[validator.address] = []
+        
+        # Record validator set change
+        current_epoch = self._get_current_epoch()
+        if current_epoch not in self.validator_set_changes:
+            self.validator_set_changes[current_epoch] = set()
+        self.validator_set_changes[current_epoch].add(validator.address)
+        
+        return True
+
+    def delegate_stake(self, delegator: str, validator: str, amount: Decimal, 
+                      reward_share: Decimal = Decimal('0.90')) -> bool:
+        """Delegate stake to validator"""
+        if validator not in self.validators or amount <= 0:
+            return False
+
+        if reward_share > Decimal('1') or reward_share < Decimal('0'):
+            return False
+
+        # Create delegation info
+        delegation = DelegationInfo(
+            validator_address=validator,
+            delegator_address=delegator,
+            amount=amount,
+            reward_share=reward_share,
+            start_time=int(time.time())
+        )
+
+        # Update delegations
+        if validator not in self.delegations:
+            self.delegations[validator] = []
+        self.delegations[validator].append(delegation)
+
+        # Update delegator tracking
+        if delegator not in self.delegator_info:
+            self.delegator_info[delegator] = set()
+        self.delegator_info[delegator].add(validator)
+
+        # Update validator's delegated stake
+        self.validators[validator].total_delegated += amount
+        self.total_stake += amount
+
+        return True
+
+    def undelegate_stake(self, delegator: str, validator: str, amount: Decimal) -> bool:
+        """Undelegate stake from validator"""
+        if validator not in self.delegations:
+            return False
+
+        # Find delegation
+        delegation = None
+        for d in self.delegations[validator]:
+            if d.delegator_address == delegator and d.is_active:
+                delegation = d
+                break
+
+        if not delegation or delegation.amount < amount:
+            return False
+
+        # Start unbonding period
+        unbonding_time = int(time.time()) + Config.UNBONDING_PERIOD
+        delegation.unbonding_time = unbonding_time
+        delegation.amount -= amount
+
+        # Update validator's delegated stake
+        self.validators[validator].total_delegated -= amount
+        self.total_stake -= amount
+
+        if delegation.amount == 0:
+            delegation.is_active = False
+            self.delegator_info[delegator].remove(validator)
+
+        return True
+
+    def slash_validator(self, validator_address: str, reason: str, 
+                       block_height: int) -> Decimal:
+        """Slash a validator for misbehavior"""
+        if validator_address not in self.validators:
+            return Decimal('0')
+
+        penalty_percentage = self.slashing_penalties.get(reason, Decimal('0'))
+        if penalty_percentage == 0:
+            return Decimal('0')
+
+        validator = self.validators[validator_address]
+        slash_amount = validator.stake * penalty_percentage
+
+        # Record slashing event
+        event = SlashingEvent(
+            validator_address=validator_address,
+            reason=reason,
+            amount=slash_amount,
+            timestamp=int(time.time()),
+            block_height=block_height
+        )
+        self.slashing_history.append(event)
+
+        # Apply penalty
+        validator.stake -= slash_amount
+        self.total_stake -= slash_amount
+
+        # Handle severe violations
+        if reason == "malicious" or validator.stake < self.min_stake:
+            self.remove_validator(validator_address)
+
+        # Slash delegators proportionally
+        if validator_address in self.delegations:
+            for delegation in self.delegations[validator_address]:
+                if delegation.is_active:
+                    slash_delegation = delegation.amount * penalty_percentage
+                    delegation.amount -= slash_delegation
+                    self.total_stake -= slash_delegation
+
+        return slash_amount
+
+    def distribute_block_rewards(self, block: Block) -> Dict[str, Decimal]:
+        """Distribute block rewards to validators and delegators"""
+        if not block.validator or block.validator not in self.validators:
+            return {}
+
+        # Calculate total reward
+        base_reward = self._calculate_base_reward(block.index)
+        total_reward = base_reward + block.total_fees
+        rewards: Dict[str, Decimal] = {}
+
+        validator = self.validators[block.validator]
+        
+        # Calculate validator's share
+        validator_share = total_reward * (validator.stake / 
+            (validator.stake + validator.total_delegated))
+        rewards[validator.address] = validator_share
+
+        # Add to validator rewards
+        self.validator_rewards[validator.address].append(
+            ValidatorReward(
+                amount=validator_share,
+                block_height=block.index,
+                timestamp=block.timestamp
+            )
+        )
+
+        # Distribute delegator rewards
+        if block.validator in self.delegations:
+            delegator_total = total_reward - validator_share
+            for delegation in self.delegations[block.validator]:
+                if delegation.is_active:
+                    stake_ratio = delegation.amount / validator.total_delegated
+                    delegator_reward = delegator_total * stake_ratio * delegation.reward_share
+                    
+                    # Update delegator rewards
+                    if delegation.delegator_address not in self.delegator_rewards:
+                        self.delegator_rewards[delegation.delegator_address] = {}
+                    if block.validator not in self.delegator_rewards[delegation.delegator_address]:
+                        self.delegator_rewards[delegation.delegator_address][block.validator] = Decimal('0')
+                    
+                    self.delegator_rewards[delegation.delegator_address][block.validator] += delegator_reward
+                    rewards[delegation.delegator_address] = rewards.get(delegation.delegator_address, Decimal('0')) + delegator_reward
+
+        return rewards
+
+    def select_validator(self, block_height: int) -> Optional[Validator]:
+        """Select validator for block production using weighted random selection"""
+        eligible_validators = self._get_eligible_validators(block_height)
+        if not eligible_validators:
+            return None
+
+        # Calculate weighted probabilities
+        total_weight = sum(self._calculate_validator_weight(v) for v in eligible_validators)
+        if total_weight == 0:
+            return None
+
+        # Select validator based on weighted probability
+        selection_point = random.uniform(0, float(total_weight))
+        current_weight = Decimal('0')
+
+        for validator in eligible_validators:
+            current_weight += self._calculate_validator_weight(validator)
+            if current_weight >= selection_point:
+                self._update_validator_selection(validator.address, block_height)
+                return validator
+
+        return eligible_validators[0]
+
+    def _calculate_validator_weight(self, validator: Validator) -> Decimal:
+        """Calculate validator selection weight"""
+        # Base weight from stake
+        base_weight = validator.stake + validator.total_delegated
+        
+        # Performance multiplier
+        performance = self.validator_performance[validator.address]
+        blocks_proposed = performance["blocks_proposed"]
+        blocks_missed = performance["missed_blocks"]
+        
+        if blocks_proposed + blocks_missed == 0:
+            performance_multiplier = Decimal('1')
+        else:
+            success_rate = blocks_proposed / (blocks_proposed + blocks_missed)
+            performance_multiplier = Decimal(str(success_rate))
+
+        # Time since last block multiplier
+        time_since_last = int(time.time()) - performance["last_active"]
+        time_multiplier = Decimal('1') + (Decimal(str(time_since_last)) / Decimal('3600'))  # Increases by 1/hour
+
+        return base_weight * performance_multiplier * time_multiplier
+
+    def _get_eligible_validators(self, block_height: int) -> List[Validator]:
+        """Get list of eligible validators for block production"""
+        return [
+            v for v in self.validators.values()
+            if (v.is_active and 
+                v.stake >= self.min_stake and
+                not self._is_recently_slashed(v.address) and
+                not self._has_missed_too_many_blocks(v.address))
+        ]
+
+    def _calculate_base_reward(self, block_height: int) -> Decimal:
+        """Calculate base block reward with emission schedule"""
+        initial_reward = Decimal(str(Config.INITIAL_BLOCK_REWARD))
+        halvings = block_height // Config.REWARD_HALVING_INTERVAL
+        return initial_reward / (Decimal('2') ** halvings)
+
+    def _has_recent_slashing(self, validator_address: str) -> bool:
+        """Check if validator has been slashed recently"""
+        recent_time = int(time.time()) - Config.SLASHING_LOOKBACK_PERIOD
+        return any(
+            event.validator_address == validator_address and event.timestamp > recent_time
+            for event in self.slashing_history
+        )
+
+    def _has_missed_too_many_blocks(self, validator_address: str) -> bool:
+        """Check if validator has missed too many blocks"""
+        return self.missed_blocks.get(validator_address, 0) > Config.MAX_MISSED_BLOCKS
+
+    def _get_current_epoch(self) -> int:
+        """Get current epoch number"""
+        return self.current_epoch
+
+    def advance_epoch(self):
+        """Advance to next epoch and perform epoch-related tasks"""
+        self.current_epoch += 1
+        
+        # Reset missed blocks counter
+        self.missed_blocks = {addr: 0 for addr in self.validators}
+        
+        # Process unbonding delegations
+        current_time = int(time.time())
+        for validator_address, delegations in self.delegations.items():
+            for delegation in delegations:
+                if (delegation.unbonding_time and 
+                    delegation.unbonding_time <= current_time and 
+                    delegation.is_active):
+                    delegation.is_active = False
+
+        # Update validator set if needed
+        if self.current_epoch in self.validator_set_changes:
+            self._update_validator_set()
+
+    def _update_validator_set(self):
+        """Update validator set for new epoch"""
+        # Sort validators by stake
+        sorted_validators = sorted(
+            self.validators.values(),
+            key=lambda v: v.stake + v.total_delegated,
+            reverse=True
+        )
+
+        # Deactivate validators outside top spots
+        for validator in sorted_validators[self.max_validators:]:
+            validator.is_active = False
+
+        # Activate top validators
+        for validator in sorted_validators[:self.max_validators]:
+            validator.is_active = True
+
+    def get_validator_set(self) -> Dict[str, Decimal]:
+        """Get current validator set with stakes"""
+        return {
+            addr: validator.stake + validator.total_delegated
+            for addr, validator in self.validators.items()
+            if validator.is_active
+        }
+
+    def get_validator_metrics(self, validator_address: str) -> Dict:
+        """Get comprehensive validator metrics"""
+        if validator_address not in self.validators:
+            return {}
+
+        validator = self.validators[validator_address]
+        performance = self.validator_performance[validator_address]
+
+        return {
+            "address": validator_address,
+            "stake": validator.stake,
+            "delegated_stake": validator.total_delegated,
+            "total_stake": validator.stake + validator.total_delegated,
+            "is_active": validator.is_active,
+            "start_epoch": validator.start_epoch,
+            "performance": {
+                "blocks_proposed": performance["blocks_proposed"],
+                "blocks_signed": performance["blocks_signed"],
+                "missed_blocks": performance["missed_blocks"],
+                "last_active": performance["last_active"]
+            },
+            "delegations": len(self.delegations.get(validator_address, [])),
+            "voting_power": self._calculate_voting_power(validator_address),
+            "reward_metrics": self._get_reward_metrics(validator_address),
+            "slashing_history": self._get_validator_slashing_history(validator_address)
+        }
+
+    def _calculate_voting_power(self, validator_address: str) -> Decimal:
+        """Calculate validator's voting power"""
+        if validator_address not in self.validators:
+            return Decimal('0')
+        
+        validator = self.validators[validator_address]
+        total_stake = validator.stake + validator.total_delegated
+        return (total_stake / self.total_stake) if self.total_stake > 0 else Decimal('0')
+
+    def _get_reward_metrics(self, validator_address: str) -> Dict:
+        """Get validator reward metrics"""
+        if validator_address not in self.validator_rewards:
+            return {
+                "total_rewards": Decimal('0'),
+                "unclaimed_rewards": Decimal('0'),
+                "last_reward_height": 0
+            }
+
+        rewards = self.validator_rewards[validator_address]
+        total_rewards = sum(r.amount for r in rewards)
+        unclaimed_rewards = sum(r.amount for r in rewards if not r.claimed)
+        last_reward = max(rewards, key=lambda r: r.block_height) if rewards else None
+
+        return {
+            "total_rewards": total_rewards,
+            "unclaimed_rewards": unclaimed_rewards,
+            "last_reward_height": last_reward.block_height if last_reward else 0
+        }
+
+    def _get_validator_slashing_history(self, validator_address: str) -> List[Dict]:
+        """Get validator slashing history"""
+        return [
+            {
+                "reason": event.reason,
+                "amount": event.amount,
+                "timestamp": event.timestamp,
+                "block_height": event.block_height
+            }
+            for event in self.slashing_history
+            if event.validator_address == validator_address
+        ]
+
+    def get_delegator_metrics(self, delegator_address: str) -> Dict:
+        """Get delegator metrics"""
+        if delegator_address not in self.delegator_info:
+            return {}
+
+        delegations = []
+        total_delegated = Decimal('0')
+        total_rewards = Decimal('0')
+
+        for validator_address in self.delegator_info[delegator_address]:
+            delegation = next(
+                (d for d in self.delegations[validator_address] 
+                 if d.delegator_address == delegator_address and d.is_active),
+                None
+            )
+            
+            if delegation:
+                delegated_amount = delegation.amount
+                rewards = self.delegator_rewards.get(delegator_address, {}).get(validator_address, Decimal('0'))
+                
+                delegations.append({
+                    "validator_address": validator_address,
+                    "amount": delegated_amount,
+                    "reward_share": delegation.reward_share,
+                    "start_time": delegation.start_time,
+                    "rewards": rewards
+                })
+                
+                total_delegated += delegated_amount
+                total_rewards += rewards
+
+        return {
+            "address": delegator_address,
+            "total_delegated": total_delegated,
+            "total_rewards": total_rewards,
+            "active_delegations": len(delegations),
+            "delegations": delegations
+        }
+
+    def update_validator_performance(self, validator_address: str, block_height: int, 
+                                  action: str, success: bool = True):
+        """Update validator performance metrics"""
+        if validator_address not in self.validator_performance:
+            return
+
+        performance = self.validator_performance[validator_address]
+        current_time = int(time.time())
+
+        if action == "propose":
+            if success:
+                performance["blocks_proposed"] += 1
+                performance["last_active"] = current_time
+            else:
+                performance["missed_blocks"] += 1
+                self.missed_blocks[validator_address] = self.missed_blocks.get(validator_address, 0) + 1
+
+        elif action == "sign":
+            if success:
+                performance["blocks_signed"] += 1
+                performance["last_active"] = current_time
+
+        # Check for validator deactivation
+        if self.missed_blocks.get(validator_address, 0) > Config.MAX_MISSED_BLOCKS:
+            self._handle_validator_downtime(validator_address, block_height)
+
+    def _handle_validator_downtime(self, validator_address: str, block_height: int):
+        """Handle validator downtime penalties"""
+        self.slash_validator(validator_address, "downtime", block_height)
+        validator = self.validators[validator_address]
+        validator.is_active = False
+
+        # Set cooldown period
+        validator.cooldown_end = int(time.time()) + Config.VALIDATOR_COOLDOWN_PERIOD
+
+    def process_validator_cooldowns(self):
+        """Process validator cooldowns and reactivate if eligible"""
+        current_time = int(time.time())
+        for validator in self.validators.values():
+            if (not validator.is_active and 
+                hasattr(validator, 'cooldown_end') and 
+                validator.cooldown_end <= current_time):
+                if validator.stake >= self.min_stake:
+                    validator.is_active = True
+                    validator.cooldown_end = None
+
+    def get_consensus_metrics(self) -> Dict:
+        """Get comprehensive consensus metrics"""
+        return {
+            "total_stake": self.total_stake,
+            "active_validators": len([v for v in self.validators.values() if v.is_active]),
+            "total_validators": len(self.validators),
+            "current_epoch": self.current_epoch,
+            "last_finalized_height": self.last_finalized_height,
+            "total_delegations": sum(len(d) for d in self.delegations.values()),
+            "average_stake": self.total_stake / len(self.validators) if self.validators else Decimal('0'),
+            "stake_concentration": self._calculate_stake_concentration(),
+            "validator_participation": self._calculate_validator_participation()
+        }
+
+    def _calculate_stake_concentration(self) -> Decimal:
+        """Calculate stake concentration (Gini coefficient)"""
+        if not self.validators:
+            return Decimal('0')
+
+        stakes = sorted(
+            validator.stake + validator.total_delegated 
+            for validator in self.validators.values()
+        )
+        n = len(stakes)
+        if n == 0 or sum(stakes) == 0:
+            return Decimal('0')
+
+        cumulative_stakes = [sum(stakes[:i+1]) for i in range(n)]
+        area = sum((cumulative_stakes[i] / cumulative_stakes[-1]) for i in range(n))
+        gini = (n + 1 - 2 * area) / n
+
+        return Decimal(str(gini))
+
+    def _calculate_validator_participation(self) -> Decimal:
+        """Calculate validator participation rate"""
+        total_blocks = sum(
+            perf["blocks_proposed"] + perf["missed_blocks"]
+            for perf in self.validator_performance.values()
+        )
+        
+        if total_blocks == 0:
+            return Decimal('1')
+
+        successful_blocks = sum(
+            perf["blocks_proposed"]
+            for perf in self.validator_performance.values()
+        )
+
+        return Decimal(str(successful_blocks)) / Decimal(str(total_blocks))
+
+    def export_state(self) -> Dict:
+        """Export complete consensus state"""
+        return {
+            "validators": {
+                addr: {
+                    "stake": str(v.stake),
+                    "total_delegated": str(v.total_delegated),
+                    "is_active": v.is_active,
+                    "start_epoch": v.start_epoch
+                }
+                for addr, v in self.validators.items()
+            },
+            "delegations": {
+                validator: [
+                    {
+                        "delegator": d.delegator_address,
+                        "amount": str(d.amount),
+                        "reward_share": str(d.reward_share),
+                        "start_time": d.start_time,
+                        "is_active": d.is_active
+                    }
+                    for d in delegations
+                ]
+                for validator, delegations in self.delegations.items()
+            },
+            "rewards": {
+                "validator_rewards": {
+                    addr: [
+                        {
+                            "amount": str(r.amount),
+                            "block_height": r.block_height,
+                            "timestamp": r.timestamp,
+                            "claimed": r.claimed
+                        }
+                        for r in rewards
+                    ]
+                    for addr, rewards in self.validator_rewards.items()
+                },
+                "delegator_rewards": {
+                    delegator: {
+                        validator: str(amount)
+                        for validator, amount in rewards.items()
+                    }
+                    for delegator, rewards in self.delegator_rewards.items()
+                }
+            },
+            "metrics": self.get_consensus_metrics()
+        }
+
+# src/consensus/validator.py
+from typing import List, Dict, Optional
+from ..blockchain.block import Block
+from ..blockchain.transaction import Transaction
+from ..wallet.keys import KeyPair
+import time
+
+class Validator:
+    def __init__(self, address: str, stake: float, keypair: KeyPair):
+        self.address = address
+        self.stake = stake
+        self.keypair = keypair
+        self.is_active = True
+        self.last_validation_time = 0
+        self.validation_count = 0
+
+    def validate_block(self, block: Block) -> bool:
+        """
+        Validate a block's transactions and structure
+        """
+        # Check block structure
+        if not block.previous_hash or not block.timestamp:
+            return False
+
+        # Check timestamp (not in the future)
+        current_time = int(time.time())
+        if block.timestamp > current_time:
+            return False
+
+        # Validate all transactions in the block
+        for tx in block.transactions:
+            if not self.validate_transaction(tx):
+                return False
+
+        return True
+
+    def validate_transaction(self, transaction: Transaction) -> bool:
+        """
+        Validate a single transaction
+        """
+        if not transaction.sender or not transaction.recipient:
+            return False
+        if transaction.amount <= 0:
+            return False
+        return True
+
+    def calculate_priority(self, current_time: int) -> float:
+        """
+        Calculate validator priority based on stake and time since last validation
+        """
+        time_weight = current_time - self.last_validation_time
+        return self.stake * time_weight
+
+#crypto/_init_.py
+from .hash import Hash
+from .signature import SignatureUtils
+
+__all__ = ['Hash', 'SignatureUtils']
+
+# src/crypto/hash.py
+from typing import Union
+import hashlib
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+import base64
+
+class Hash:
+    @staticmethod
+    def hash_public_key(public_key: Union[str, bytes, rsa.RSAPublicKey]) -> str:
+        """
+        Create hash of a public key
+        """
+        if isinstance(public_key, rsa.RSAPublicKey):
+            # Convert RSA public key to bytes
+            public_key = public_key.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+        elif isinstance(public_key, str):
+            public_key = public_key.encode()
+        
+        # First SHA-256
+        sha256_hash = hashlib.sha256(public_key).digest()
+        # Then RIPEMD-160
+        ripemd160_hash = hashlib.new('ripemd160')
+        ripemd160_hash.update(sha256_hash)
+        
+        return ripemd160_hash.hexdigest()
+
+    @staticmethod
+    def hash_string(data: str) -> str:
+        """
+        Create SHA-256 hash of a string
+        """
+        return hashlib.sha256(data.encode()).hexdigest()
+
+#src/crypto/signature.py
+from typing import Optional
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+import base64
+
+class SignatureManager:
+    """
+    Handles digital signatures for transactions
+    """
+    
+    @staticmethod
+    def create_signature(message: str, private_key: rsa.RSAPrivateKey) -> str:
+        """
+        Create a digital signature for a message using a private key
+        """
+        signature = private_key.sign(
+            message.encode(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return base64.b64encode(signature).decode()
+
+    @staticmethod
+    def verify_signature(message: str, signature: str, public_key: rsa.RSAPublicKey) -> bool:
+        """
+        Verify a digital signature using a public key
+        """
+        try:
+            signature_bytes = base64.b64decode(signature)
+            public_key.verify(
+                signature_bytes,
+                message.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def sign_data(data: str, private_key: rsa.RSAPrivateKey) -> Optional[str]:
+        """
+        Sign arbitrary data, returns None if signing fails
+        """
+        try:
+            return SignatureManager.create_signature(data, private_key)
+        except Exception:
+            return None
+
+    @staticmethod
+    def verify_data(data: str, signature: str, public_key: rsa.RSAPublicKey) -> bool:
+        """
+        Verify signed data
+        """
+        return SignatureManager.verify_signature(data, signature, public_key)
+
+# src/network/node.py
+import socket
+import json
+import copy
+from typing import List, Dict, Optional, Tuple
+from ..blockchain.blockchain import Blockchain
+from ..blockchain.block import Block
+from ..blockchain.transaction import Transaction
+
+class Node:
+    def __init__(self, host: str, port: int, blockchain: Optional[Blockchain] = None):
+        self.host = host
+        self.port = port
+        self.blockchain = blockchain or Blockchain()
+        self.peers: List[Tuple[str, int]] = []
+
+    def synchronize_with_peer(self, peer_node) -> bool:
+        """Synchronize blockchain with peer"""
+        if len(peer_node.blockchain.chain) <= len(self.blockchain.chain):
+            return True  # Already up to date
+
+        # Create a temporary blockchain for validation
+        temp_chain = copy.deepcopy(self.blockchain)
+        
+        # Try to add each new block
+        for block in peer_node.blockchain.chain[len(self.blockchain.chain):]:
+            if not temp_chain.add_block(block):
+                return False
+
+        # If all blocks were added successfully, update our blockchain
+        self.blockchain = temp_chain
+        return True
+
+    def broadcast_block(self, block: Block):
+        message = {
+            "type": "block",
+            "data": block.to_dict()
+        }
+        for peer in self.peers:
+            self._send_message(peer, message)
+
+    def broadcast_transaction(self, transaction: Transaction):
+        message = {
+            "type": "transaction",
+            "data": transaction.to_dict()
+        }
+        for peer in self.peers:
+            self._send_message(peer, message)
+
+    def _send_message(self, peer: Tuple[str, int], message: Dict):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.connect(peer)
+            sock.send(json.dumps(message).encode())
+        finally:
+            sock.close()
+
+    def connect_to_peer(self, peer_address: Tuple[str, int]) -> bool:
+        if peer_address not in self.peers:
+            self.peers.append(peer_address)
+            return True
+        return False
+
+# src/network/p2p.py
+# P2P Network System
+# Handles peer-to-peer communication, message propagation, and network synchronization
+# Core networking component for distributed blockchain operation
+
+from typing import Dict, List, Set, Optional, Any, Union, TYPE_CHECKING, Tuple, Awaitable, Callable
+import asyncio
+import json
+import logging
+import time
+from dataclasses import dataclass
+from enum import Enum
+import socket
+import threading
+from ..blockchain.block import Block
+from ..blockchain.transaction import Transaction
+from ..utils.config import Config
+
+if TYPE_CHECKING:
+    from ..blockchain.blockchain import Blockchain
+    from ..blockchain.mempool import Mempool
+
+class MessageType(Enum):
+    HANDSHAKE = "handshake"
+    GET_BLOCKS = "get_blocks"
+    BLOCKS = "blocks"
+    NEW_BLOCK = "new_block"
+    NEW_TRANSACTION = "new_transaction"
+    GET_MEMPOOL = "get_mempool"
+    MEMPOOL = "mempool"
+    PEER_LIST = "peer_list"
+    PING = "ping"
+    PONG = "pong"
+
+@dataclass
+class PeerInfo:
+    """Store information about connected peers"""
+    address: str
+    port: int
+    last_seen: float
+    version: str
+    height: int
+    is_active: bool = True
+    failed_attempts: int = 0
+    latency: float = 0.0
+    writer: Optional[asyncio.StreamWriter] = None
+
+class P2PNetwork:
+    def __init__(self, host: str, port: int, blockchain: 'Blockchain', 
+                 mempool: 'Mempool', max_peers: int = Config.MAX_PEERS):
+        self.host = host
+        self.port = port
+        self.blockchain = blockchain
+        self.mempool = mempool
+        self.max_peers = max_peers
+        
+        # Peer management
+        self.peers: Dict[str, PeerInfo] = {}
+        self.pending_connections: Set[str] = set()
+        self.blacklisted: Set[str] = set()
+        
+        # Network state
+        self.is_running = False
+        self.server: Optional[asyncio.AbstractServer] = None
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        
+        # Message handlers
+        self.message_handlers: Dict[MessageType, Callable[[Dict, str], Awaitable[None]]] = {
+            MessageType.HANDSHAKE: self._handle_handshake,
+            MessageType.GET_BLOCKS: self._handle_get_blocks,
+            MessageType.BLOCKS: self._handle_blocks,
+            MessageType.NEW_BLOCK: self._handle_new_block,
+            MessageType.NEW_TRANSACTION: self._handle_new_transaction,
+            MessageType.GET_MEMPOOL: self._handle_get_mempool,
+            MessageType.MEMPOOL: self._handle_mempool,
+            MessageType.PEER_LIST: self._handle_peer_list,
+            MessageType.PING: self._handle_ping,
+            MessageType.PONG: self._handle_pong
+        }
+        
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        
+        # Initialize synchronization state
+        self.sync_state = {
+            "is_syncing": False,
+            "start_height": 0,
+            "target_height": 0,
+            "current_height": 0,
+            "start_time": 0
+        }
+
+    async def start(self):
+        """Start P2P network operations"""
+        if self.is_running:
+            return
+
+        self.is_running = True
+        self.loop = asyncio.get_event_loop()
+
+        try:
+            server = await asyncio.start_server(
+                self._handle_connection, self.host, self.port
+            )
+            self.server = server
+            
+            # Start maintenance tasks
+            asyncio.create_task(self._peer_maintenance())
+            asyncio.create_task(self._network_synchronization())
+            
+            self.logger.info(f"P2P Network started on {self.host}:{self.port}")
+            
+            # Connect to initial peers
+            await self._connect_to_initial_peers()
+            
+            async with server:
+                await server.serve_forever()
+                
+        except Exception as e:
+            self.logger.error(f"Error starting P2P network: {e}")
+            self.is_running = False
+            raise
+
+    async def stop(self):
+        """Stop P2P network operations"""
+        if not self.is_running:
+            return
+
+        self.is_running = False
+        
+        # Close all peer connections
+        for peer_id in list(self.peers.keys()):
+            await self._disconnect_peer(peer_id)
+
+        # Close server
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+            
+        self.logger.info("P2P Network stopped")
+
+    def _can_accept_connection(self, peer_id: str) -> bool:
+        """Check if we can accept a new connection"""
+        if peer_id in self.blacklisted:
+            return False
+        if len(self.peers) >= self.max_peers:
+            return False
+        if peer_id in self.peers or peer_id in self.pending_connections:
+            return False
+        return True
+
+    async def _connect_to_initial_peers(self):
+        """Connect to initial set of peers"""
+        for peer in Config.INITIAL_PEERS:
+            try:
+                await self._connect_to_peer(peer)
+            except Exception as e:
+                self.logger.error(f"Failed to connect to initial peer {peer}: {e}")
+
+    async def _connect_to_peer(self, address: Tuple[str, int]):
+        """Establish connection to a new peer"""
+        peer_id = f"{address[0]}:{address[1]}"
+        
+        if not self._can_accept_connection(peer_id):
+            return False
+
+        try:
+            reader, writer = await asyncio.open_connection(address[0], address[1])
+            self.pending_connections.add(peer_id)
+            
+            if await self._perform_handshake(reader, writer, peer_id):
+                asyncio.create_task(self._handle_peer_messages(reader, writer, peer_id))
+                return True
+                
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error connecting to peer {peer_id}: {e}")
+            self.pending_connections.discard(peer_id)
+            return False
+
+    async def _handle_connection(self, reader: asyncio.StreamReader, 
+                               writer: asyncio.StreamWriter):
+        """Handle incoming peer connection"""
+        peer_address = writer.get_extra_info('peername')
+        peer_id = f"{peer_address[0]}:{peer_address[1]}"
+
+        try:
+            if not self._can_accept_connection(peer_id):
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            self.pending_connections.add(peer_id)
+
+            if await self._perform_handshake(reader, writer, peer_id):
+                await self._handle_peer_messages(reader, writer, peer_id)
+                
+        except Exception as e:
+            self.logger.error(f"Error handling connection from {peer_id}: {e}")
+        finally:
+            self.pending_connections.discard(peer_id)
+            await self._disconnect_peer(peer_id)
+
+    async def _perform_handshake(self, reader: asyncio.StreamReader, 
+                               writer: asyncio.StreamWriter, peer_id: str) -> bool:
+        """Perform handshake with new peer"""
+        try:
+            # Send handshake
+            handshake = {
+                "type": MessageType.HANDSHAKE.value,
+                "data": {
+                    "version": Config.PROTOCOL_VERSION,
+                    "height": len(self.blockchain.chain),
+                    "port": self.port
+                }
+            }
+            await self._send_message(writer, handshake)
+
+            # Receive handshake
+            response = await self._read_message(reader)
+            if not response or response.get("type") != MessageType.HANDSHAKE.value:
+                return False
+
+            peer_data = response.get("data", {})
+            self.peers[peer_id] = PeerInfo(
+                address=peer_id.split(":")[0],
+                port=int(peer_id.split(":")[1]),
+                last_seen=time.time(),
+                version=peer_data.get("version", "unknown"),
+                height=peer_data.get("height", 0),
+                writer=writer
+            )
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Handshake failed with {peer_id}: {e}")
+            return False
+
+    async def _handle_peer_messages(self, reader: asyncio.StreamReader, 
+                                  writer: asyncio.StreamWriter, peer_id: str):
+        """Handle messages from a connected peer"""
+        try:
+            while self.is_running and peer_id in self.peers:
+                message = await self._read_message(reader)
+                if message is None:
+                    break
+                    
+                message_type = message.get("type")
+                if message_type in MessageType.__members__:
+                    await self._handle_message(message, peer_id)
+                else:
+                    self.logger.warning(f"Unknown message type from {peer_id}: {message_type}")
+                    
+        except Exception as e:
+            self.logger.error(f"Error handling messages from {peer_id}: {e}")
+        finally:
+            await self._disconnect_peer(peer_id)
+
+    async def _read_message(self, reader: asyncio.StreamReader) -> Optional[Dict]:
+        """Read and decode a message"""
+        try:
+            # Read message length (4 bytes)
+            length_bytes = await reader.read(4)
+            if not length_bytes:
+                return None
+                
+            message_length = int.from_bytes(length_bytes, 'big')
+            if message_length > Config.MAX_MESSAGE_SIZE:
+                raise ValueError(f"Message too large: {message_length}")
+                
+            # Read message data
+            message_data = await reader.read(message_length)
+            if not message_data:
+                return None
+                
+            return json.loads(message_data.decode())
+            
+        except Exception as e:
+            self.logger.error(f"Error reading message: {e}")
+            return None
+
+    async def _send_message(self, writer: asyncio.StreamWriter, message: Dict):
+        """Encode and send a message"""
+        try:
+            # Encode message
+            message_data = json.dumps(message).encode()
+            message_length = len(message_data)
+            
+            # Send length followed by message
+            writer.write(message_length.to_bytes(4, 'big'))
+            writer.write(message_data)
+            await writer.drain()
+            
+        except Exception as e:
+            self.logger.error(f"Error sending message: {e}")
+            raise
+
+    async def broadcast_transaction(self, transaction: Transaction):
+        """Broadcast transaction to all peers"""
+        message = {
+            "type": MessageType.NEW_TRANSACTION.value,
+            "data": transaction.to_dict()
+        }
+        await self._broadcast_message(message)
+
+    async def broadcast_block(self, block: Block):
+        """Broadcast new block to all peers"""
+        message = {
+            "type": MessageType.NEW_BLOCK.value,
+            "data": block.to_dict()
+        }
+        await self._broadcast_message(message)
+
+    async def _broadcast_message(self, message: Dict):
+        """Broadcast message to all connected peers"""
+        for peer_id, peer in list(self.peers.items()):
+            try:
+                if peer.writer and not peer.writer.is_closing():
+                    await self._send_message(peer.writer, message)
+            except Exception as e:
+                self.logger.error(f"Error broadcasting to {peer_id}: {e}")
+                await self._disconnect_peer(peer_id)
+
+    async def _handle_message(self, message: Dict, peer_id: str):
+        """Process received message"""
+        try:
+            message_type = MessageType(message.get("type"))
+            handler = self.message_handlers.get(message_type)
+            
+            if handler:
+                await handler(message.get("data", {}), peer_id)
+            else:
+                self.logger.warning(f"No handler for message type: {message_type}")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling message from {peer_id}: {e}")
+
+    async def _handle_handshake(self, data: Dict, peer_id: str):
+        """Handle handshake message"""
+        pass  # Handled in _perform_handshake
+
+    async def _handle_get_blocks(self, data: Dict, peer_id: str):
+        """Handle get_blocks message"""
+        try:
+            start = data.get("start", 0)
+            end = data.get("end", 0)
+            
+            if end > start and end - start <= Config.MAX_BLOCKS_PER_REQUEST:
+                blocks = []
+                for i in range(start, min(end, len(self.blockchain.chain))):
+                    blocks.append(self.blockchain.chain[i].to_dict())
+                
+                response = {
+                    "type": MessageType.BLOCKS.value,
+                    "data": {"blocks": blocks}
+                }
+                
+                if peer_id in self.peers and self.peers[peer_id].writer:
+                    await self._send_message(self.peers[peer_id].writer, response)
+                    
+        except Exception as e:
+            self.logger.error(f"Error handling get_blocks from {peer_id}: {e}")
+
+    async def _handle_blocks(self, data: Dict, peer_id: str):
+        """Handle blocks message"""
+        try:
+            blocks_data = data.get("blocks", [])
+            for block_data in blocks_data:
+                block = Block.from_dict(block_data)
+                if self.blockchain.add_block(block):
+                    self.sync_state["current_height"] = block.index
+                    
+        except Exception as e:
+            self.logger.error(f"Error handling blocks from {peer_id}: {e}")
+
+    async def _handle_new_block(self, data: Dict, peer_id: str):
+        """Handle new_block message"""
+        try:
+            block = Block.from_dict(data)
+            if self.blockchain.add_block(block):
+                # Relay to other peers
+                for other_peer_id, peer in self.peers.items():
+                    if other_peer_id != peer_id:
+                        message = {
+                            "type": MessageType.NEW_BLOCK.value,
+                            "data": data
+                        }
+                        if peer.writer:
+                            await self._send_message(peer.writer, message)
+                            
+        except Exception as e:
+            self.logger.error(f"Error handling new block from {peer_id}: {e}")
+
+    async def _handle_new_transaction(self, data: Dict, peer_id: str):
+        """Handle new_transaction message"""
+        try:
+            transaction = Transaction.from_dict(data)
+            if self.mempool.add_transaction(transaction, self.blockchain):
+                # Relay to other peers
+                for other_peer_id, peer in self.peers.items():
+                    if other_peer_id != peer_id:
+                        message = {
+                            "type": MessageType.NEW_TRANSACTION.value,
+                            "data": data
+                        }
+                        if peer.writer:
+                            await self._send_message(peer.writer, message)
+                            
+        except Exception as e:
+            self.logger.error(f"Error handling new transaction from {peer_id}: {e}")
+
+    async def _handle_get_mempool(self, data: Dict, peer_id: str):
+        """Handle get_mempool message"""
+        try:
+            if peer_id in self.peers and self.peers[peer_id].writer:
+                transactions = [tx.to_dict() for tx in self.mempool.get_transactions_for_block(
+                    Config.MAX_BLOCK_SIZE, Config.MAX_BLOCK_TRANSACTIONS)]
+                
+                response = {
+                    "type": MessageType.MEMPOOL.value,
+                    "data": {"transactions": transactions}
+                }
+                await self._send_message(self.peers[peer_id].writer, response)
+                
+        except Exception as e:
+            self.logger.error(f"Error handling get_mempool from {peer_id}: {e}")
+
+    async def _handle_mempool(self, data: Dict, peer_id: str):
+        """Handle mempool message"""
+        try:
+            transactions_data = data.get("transactions", [])
+            for tx_data in transactions_data:
+                transaction = Transaction.from_dict(tx_data)
+                self.mempool.add_transaction(transaction, self.blockchain)
+                
+        except Exception as e:
+            self.logger.error(f"Error handling mempool from {peer_id}: {e}")
+
+    async def _handle_peer_list(self, data: Dict, peer_id: str):
+        """Handle peer_list message"""
+        try:
+            peer_list = data.get("peers", [])
+            for peer_data in peer_list:
+                address = (peer_data.get("address"), peer_data.get("port"))
+                if self._can_accept_connection(f"{address[0]}:{address[1]}"):
+                    await self._connect_to_peer(address)
+                    
+        except Exception as e:
+            self.logger.error(f"Error handling peer list from {peer_id}: {e}")
+
+    async def _handle_ping(self, data: Dict, peer_id: str):
+        """Handle ping message"""
+        try:
+            if peer_id in self.peers and self.peers[peer_id].writer:
+                response = {
+                    "type": MessageType.PONG.value,
+                    "data": {"timestamp": time.time()}
+                }
+                await self._send_message(self.peers[peer_id].writer, response)
+                
+        except Exception as e:
+            self.logger.error(f"Error handling ping from {peer_id}: {e}")
+
+    async def _handle_pong(self, data: Dict, peer_id: str):
+        """Handle pong message"""
+        try:
+            if peer_id in self.peers:
+                ping_time = data.get("timestamp", 0)
+                self.peers[peer_id].latency = time.time() - ping_time
+                self.peers[peer_id].last_seen = time.time()
+                
+        except Exception as e:
+            self.logger.error(f"Error handling pong from {peer_id}: {e}")
+
+    async def _disconnect_peer(self, peer_id: str):
+        """Disconnect and cleanup peer"""
+        try:
+            if peer_id in self.peers:
+                peer = self.peers[peer_id]
+                if peer.writer:
+                    try:
+                        peer.writer.close()
+                        await peer.writer.wait_closed()
+                    except Exception:
+                        pass
+                del self.peers[peer_id]
+                self.logger.info(f"Disconnected from peer {peer_id}")
+                
+        except Exception as e:
+            self.logger.error(f"Error disconnecting peer {peer_id}: {e}")
+
+    async def _peer_maintenance(self):
+        """Periodic peer maintenance"""
+        while self.is_running:
+            try:
+                current_time = time.time()
+                
+                # Check peer health
+                for peer_id in list(self.peers.keys()):
+                    peer = self.peers[peer_id]
+                    if current_time - peer.last_seen > Config.PEER_TIMEOUT:
+                        await self._disconnect_peer(peer_id)
+                        continue
+                        
+                    # Send ping to check latency
+                    if peer.writer and not peer.writer.is_closing():
+                        try:
+                            ping_message = {
+                                "type": MessageType.PING.value,
+                                "data": {"timestamp": current_time}
+                            }
+                            await self._send_message(peer.writer, ping_message)
+                        except Exception:
+                            await self._disconnect_peer(peer_id)
+                
+                # Find new peers if needed
+                if len(self.peers) < self.max_peers:
+                    await self._find_new_peers()
+                
+                await asyncio.sleep(Config.PEER_MAINTENANCE_INTERVAL)
+                
+            except Exception as e:
+                self.logger.error(f"Error in peer maintenance: {e}")
+                await asyncio.sleep(1)
+
+    async def _find_new_peers(self):
+        """Discover and connect to new peers"""
+        try:
+            # Request peer lists from existing peers
+            for peer_id, peer in list(self.peers.items()):
+                if peer.writer and not peer.writer.is_closing():
+                    message = {
+                        "type": MessageType.PEER_LIST.value,
+                        "data": {"request": True}
+                    }
+                    await self._send_message(peer.writer, message)
+                    
+        except Exception as e:
+            self.logger.error(f"Error finding new peers: {e}")
+
+    async def _network_synchronization(self):
+        """Periodic network synchronization"""
+        while self.is_running:
+            try:
+                if not self.sync_state["is_syncing"]:
+                    await self._check_sync_needed()
+                
+                await asyncio.sleep(Config.SYNC_CHECK_INTERVAL)
+                
+            except Exception as e:
+                self.logger.error(f"Error in network synchronization: {e}")
+                await asyncio.sleep(1)
+
+    def get_network_metrics(self) -> Dict:
+        """Get network metrics"""
+        try:
+            current_time = time.time()
+            active_peers = len([p for p in self.peers.values() if p.is_active])
+            average_latency = (
+                sum(p.latency for p in self.peers.values() if p.latency > 0) /
+                len(self.peers) if self.peers else 0
+            )
+            
+            sync_progress = (
+                (self.sync_state["current_height"] - self.sync_state["start_height"]) /
+                (self.sync_state["target_height"] - self.sync_state["start_height"])
+                if self.sync_state["is_syncing"] and 
+                self.sync_state["target_height"] > self.sync_state["start_height"]
+                else 1.0
+            )
+            
+            return {
+                "connected_peers": len(self.peers),
+                "active_peers": active_peers,
+                "pending_connections": len(self.pending_connections),
+                "blacklisted_peers": len(self.blacklisted),
+                "average_latency": average_latency,
+                "sync_status": {
+                    "is_syncing": self.sync_state["is_syncing"],
+                    "progress": sync_progress,
+                    "current_height": self.sync_state["current_height"],
+                    "target_height": self.sync_state["target_height"],
+                    "time_elapsed": (
+                        current_time - self.sync_state["start_time"]
+                        if self.sync_state["is_syncing"] else 0
+                    )
+                },
+                "network_health": self._calculate_network_health()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting network metrics: {e}")
+            return {}
+
+    def _calculate_network_health(self) -> float:
+        """Calculate overall network health score"""
+        try:
+            if not self.peers:
+                return 0.0
+
+            # Calculate various health factors
+            peer_factor = min(1.0, len(self.peers) / self.max_peers)
+            
+            active_peers = len([p for p in self.peers.values() if p.is_active])
+            activity_factor = active_peers / len(self.peers) if self.peers else 0
+            
+            latencies = [p.latency for p in self.peers.values() if p.latency > 0]
+            latency_factor = (
+                1.0 - (sum(latencies) / len(latencies) / 1000)
+                if latencies else 0.5
+            )
+            
+            sync_factor = 0.0 if self.sync_state["is_syncing"] else 1.0
+
+            # Combine factors with weights
+            health_score = (
+                peer_factor * 0.3 +
+                activity_factor * 0.3 +
+                latency_factor * 0.2 +
+                sync_factor * 0.2
+            )
+
+            return max(0.0, min(1.0, health_score))
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating network health: {e}")
+            return 0.0
+
+    async def get_sync_status(self) -> Dict:
+        """Get detailed synchronization status"""
+        try:
+            current_time = time.time()
+            if not self.sync_state["is_syncing"]:
+                return {
+                    "status": "synchronized",
+                    "current_height": len(self.blockchain.chain) - 1,
+                    "network_height": max(
+                        (peer.height for peer in self.peers.values()),
+                        default=len(self.blockchain.chain) - 1
+                    )
+                }
+
+            elapsed_time = current_time - self.sync_state["start_time"]
+            blocks_processed = (
+                self.sync_state["current_height"] - 
+                self.sync_state["start_height"]
+            )
+            blocks_remaining = (
+                self.sync_state["target_height"] - 
+                self.sync_state["current_height"]
+            )
+            
+            # Calculate speed and estimated time
+            speed = blocks_processed / elapsed_time if elapsed_time > 0 else 0
+            eta = blocks_remaining / speed if speed > 0 else 0
+
+            return {
+                "status": "synchronizing",
+                "progress": blocks_processed / (blocks_processed + blocks_remaining),
+                "current_height": self.sync_state["current_height"],
+                "target_height": self.sync_state["target_height"],
+                "blocks_processed": blocks_processed,
+                "blocks_remaining": blocks_remaining,
+                "speed": speed,
+                "elapsed_time": elapsed_time,
+                "estimated_time_remaining": eta
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting sync status: {e}")
+            return {"status": "error", "error": str(e)}
+
+# src/network/peer_discovery.py
+from typing import List, Dict, Set
+import socket
+import json
+import threading
+import time
+import logging
+
+class PeerDiscovery:
+    def __init__(self, host: str, port: int):
+        self.host = host
+        self.port = port
+        self.peers: Set[tuple] = set()
+        self.is_running = False
+        self.discovery_thread = None
+        self.broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+
+    def start(self):
+        """
+        Start peer discovery service
+        """
+        if self.is_running:
+            return
+        
+        self.is_running = True
+        self.discovery_thread = threading.Thread(target=self._discovery_loop)
+        self.discovery_thread.daemon = True  # Make thread daemon so it exits when main program does
+        self.discovery_thread.start()
+
+    def stop(self):
+        """
+        Stop peer discovery service
+        """
+        self.is_running = False
+        if self.discovery_thread:
+            self.discovery_thread.join(timeout=1.0)  # Wait up to 1 second for thread to finish
+        if self.broadcast_socket:
+            self.broadcast_socket.close()
+
+    def _discovery_loop(self):
+        """
+        Main discovery loop that broadcasts presence and listens for other peers
+        """
+        listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            listen_socket.bind((self.host, self.port))
+            listen_socket.settimeout(1)  # 1 second timeout
+
+            while self.is_running:
+                try:
+                    # Broadcast presence
+                    self._broadcast_presence()
+
+                    # Listen for other peers
+                    try:
+                        data, addr = listen_socket.recvfrom(1024)
+                        if data and addr:  # Check if we actually received data
+                            self._handle_peer_discovery(data, addr)
+                    except socket.timeout:
+                        # Expected timeout, continue loop
+                        continue
+                    except Exception as e:
+                        self.logger.debug(f"Error receiving data: {e}")
+                        continue
+
+                except Exception as e:
+                    self.logger.debug(f"Error in discovery loop: {e}")
+                    time.sleep(1)  # Prevent tight loop in case of repeated errors
+
+        except Exception as e:
+            self.logger.error(f"Fatal error in discovery loop: {e}")
+        finally:
+            listen_socket.close()
+
+    def _broadcast_presence(self):
+        """
+        Broadcast node presence to network
+        """
+        try:
+            message = {
+                "node_id": f"{self.host}:{self.port}",
+                "timestamp": time.time()
+            }
+            self.broadcast_socket.sendto(
+                json.dumps(message).encode(),
+                ("<broadcast>", self.port)
+            )
+        except Exception as e:
+            self.logger.debug(f"Error broadcasting presence: {e}")
+
+    def _handle_peer_discovery(self, data: bytes, addr: tuple):
+        """
+        Handle discovered peer information
+        """
+        try:
+            peer_info = json.loads(data.decode())
+            if addr not in self.peers:
+                self.peers.add(addr)
+                self.logger.info(f"New peer discovered: {addr}")
+        except json.JSONDecodeError:
+            self.logger.debug(f"Received invalid peer data from {addr}")
+        except Exception as e:
+            self.logger.debug(f"Error handling peer discovery: {e}")
+
+    def get_peers(self) -> List[tuple]:
+        """
+        Get list of all known peers
+        """
+        return list(self.peers)
+
+    def remove_peer(self, peer: tuple):
+        """
+        Remove a peer from the known peers list
+        """
+        self.peers.discard(peer)
+
+# File: src/storage/__init__.py
+# Path: bit2coin/src/storage/__init__.py
+from .database import Database, DatabaseError
+from .blockchain_state import BlockchainState
+
+__all__ = ['Database', 'DatabaseError', 'BlockchainState']
+
+# src/storage/blockchain_state.py
+from typing import Dict, Optional, List, Any
+from .database import Database, DatabaseError
+from ..blockchain.block import Block
+from ..blockchain.transaction import Transaction
+import time
+import json
+
+class BlockchainState:
+    """Manages the persistent state of the blockchain"""
+    
+    def __init__(self, db_path: str):
+        self.db = Database(db_path)
+        self._ensure_initial_state()
+        
+    def _ensure_initial_state(self) -> None:
+        """Initialize blockchain state if not exists"""
+        if self.db.get("chain:metadata") is None:
+            initial_state = {
+                "height": 0,
+                "total_transactions": 0,
+                "total_supply": 0.0,
+                "last_updated": int(time.time())
+            }
+            self.db.put("chain:metadata", initial_state)
+    
+    def apply_block(self, block: Block) -> bool:
+        """
+        Apply a new block to the blockchain state
+        Returns True if successful, False otherwise
+        """
+        try:
+            updates = {}
+            
+            # Update block data
+            updates[f"block:{block.hash}"] = block.to_dict()
+            
+            # Update chain metadata
+            metadata = self.db.get("chain:metadata")
+            metadata["height"] += 1
+            metadata["total_transactions"] += len(block.transactions)
+            metadata["last_updated"] = int(time.time())
+            updates["chain:metadata"] = metadata
+            
+            # Update chain head
+            updates["chain:head"] = {"hash": block.hash}
+            
+            # Process all transactions
+            for tx in block.transactions:
+                # Store transaction
+                updates[f"tx:{tx.transaction_id}"] = tx.to_dict()
+                
+                # Update sender balance (if not genesis)
+                if tx.sender != "genesis":
+                    sender_balance = self.get_balance(tx.sender)
+                    new_sender_balance = sender_balance - float(tx.amount)
+                    if new_sender_balance < 0:
+                        return False
+                    updates[f"balance:{tx.sender}"] = {"balance": new_sender_balance}
+                
+                # Update recipient balance
+                recipient_balance = self.get_balance(tx.recipient)
+                new_recipient_balance = recipient_balance + float(tx.amount)
+                updates[f"balance:{tx.recipient}"] = {"balance": new_recipient_balance}
+                
+                # Update address transaction indices
+                self._update_address_transactions(updates, tx.sender, tx.transaction_id)
+                self._update_address_transactions(updates, tx.recipient, tx.transaction_id)
+            
+            # Perform batch update
+            return self.db.batch_write(updates)
+            
+        except DatabaseError:
+            return False
+    
+    def _update_address_transactions(self, updates: Dict[str, Any], address: str, tx_id: str) -> None:
+        """Update transaction history for an address"""
+        if address == "genesis":
+            return
+            
+        key = f"address_txs:{address}"
+        tx_list = self.db.get(key) or {"transactions": []}
+        tx_list["transactions"].append(tx_id)
+        updates[key] = tx_list
+    
+    def revert_block(self, block: Block) -> bool:
+        """
+        Revert a block's changes from the blockchain state
+        Returns True if successful, False otherwise
+        """
+        try:
+            updates = {}
+            
+            # Update chain metadata
+            metadata = self.db.get("chain:metadata")
+            metadata["height"] -= 1
+            metadata["total_transactions"] -= len(block.transactions)
+            metadata["last_updated"] = int(time.time())
+            updates["chain:metadata"] = metadata
+            
+            # Update chain head to previous block
+            updates["chain:head"] = {"hash": block.previous_hash}
+            
+            # Revert all transactions in reverse order
+            for tx in reversed(block.transactions):
+                if tx.sender != "genesis":
+                    # Restore sender balance
+                    sender_balance = self.get_balance(tx.sender)
+                    updates[f"balance:{tx.sender}"] = {
+                        "balance": sender_balance + float(tx.amount)
+                    }
+                
+                # Restore recipient balance
+                recipient_balance = self.get_balance(tx.recipient)
+                updates[f"balance:{tx.recipient}"] = {
+                    "balance": recipient_balance - float(tx.amount)
+                }
+                
+                # Remove transaction records
+                self._remove_transaction_from_address(updates, tx.sender, tx.transaction_id)
+                self._remove_transaction_from_address(updates, tx.recipient, tx.transaction_id)
+            
+            # Perform batch update
+            return self.db.batch_write(updates)
+            
+        except DatabaseError:
+            return False
+    
+    def _remove_transaction_from_address(self, updates: Dict[str, Any], address: str, tx_id: str) -> None:
+        """Remove transaction from address history"""
+        if address == "genesis":
+            return
+            
+        key = f"address_txs:{address}"
+        tx_list = self.db.get(key)
+        if tx_list and "transactions" in tx_list:
+            tx_list["transactions"].remove(tx_id)
+            updates[key] = tx_list
+    
+    def get_balance(self, address: str) -> float:
+        """Get the current balance for an address"""
+        data = self.db.get(f"balance:{address}")
+        return data["balance"] if data else 0.0
+    
+    def get_transaction_history(self, address: str, limit: int = 100) -> List[Dict]:
+        """Get transaction history for an address"""
+        tx_list = self.db.get(f"address_txs:{address}")
+        if not tx_list:
+            return []
+            
+        transactions = []
+        for tx_id in tx_list["transactions"][-limit:]:
+            tx_data = self.db.get(f"tx:{tx_id}")
+            if tx_data:
+                transactions.append(tx_data)
+        
+        return transactions
+    
+    def get_block(self, block_hash: str) -> Optional[Dict]:
+        """Get block data by hash"""
+        return self.db.get(f"block:{block_hash}")
+    
+    def get_transaction(self, tx_id: str) -> Optional[Dict]:
+        """Get transaction data by ID"""
+        return self.db.get(f"tx:{tx_id}")
+    
+    def get_chain_metadata(self) -> Dict:
+        """Get current blockchain metadata"""
+        return self.db.get("chain:metadata") or {
+            "height": 0,
+            "total_transactions": 0,
+            "total_supply": 0.0,
+            "last_updated": int(time.time())
+        }
+    
+    def get_chain_head(self) -> Optional[str]:
+        """Get the current chain head hash"""
+        data = self.db.get("chain:head")
+        return data["hash"] if data else None
+    
+    def close(self):
+        """Close the database connection"""
+        if self.db:
+            self.db.close()
+
+# src/storage/database.py
+from typing import Optional, Dict, Any
+import sqlite3
+import json
+import os
+import threading
+
+class Database:
+    def __init__(self, db_path: str):
+        """Initialize database connection"""
+        self.db_path = db_path
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._local = threading.local()
+        self._init_db()
+        
+    def _get_conn(self):
+        """Get thread-local database connection"""
+        if not hasattr(self._local, 'conn'):
+            self._local.conn = sqlite3.connect(self.db_path)
+            self._local.conn.row_factory = sqlite3.Row
+        return self._local.conn
+
+    def _init_db(self):
+        """Initialize database tables"""
+        conn = self._get_conn()
+        with conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS key_value_store (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_key 
+                ON key_value_store(key)
+            """)
+        
+    def put(self, key: str, value: Any) -> None:
+        """Store a key-value pair"""
+        try:
+            conn = self._get_conn()
+            serialized_value = json.dumps(value)
+            with conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO key_value_store (key, value) VALUES (?, ?)",
+                    (key, serialized_value)
+                )
+        except Exception as e:
+            raise DatabaseError(f"Error storing data: {str(e)}")
+
+    def get(self, key: str) -> Optional[Any]:
+        """Retrieve a value by key"""
+        try:
+            conn = self._get_conn()
+            with conn:
+                cursor = conn.execute(
+                    "SELECT value FROM key_value_store WHERE key = ?",
+                    (key,)
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                return json.loads(row['value'])
+        except Exception as e:
+            raise DatabaseError(f"Error retrieving data: {str(e)}")
+
+    def delete(self, key: str) -> bool:
+        """Delete a key-value pair"""
+        try:
+            conn = self._get_conn()
+            with conn:
+                conn.execute(
+                    "DELETE FROM key_value_store WHERE key = ?",
+                    (key,)
+                )
+            return True
+        except Exception as e:
+            return False
+
+    def batch_write(self, items: Dict[str, Any]) -> bool:
+        """Write multiple key-value pairs atomically"""
+        try:
+            conn = self._get_conn()
+            with conn:
+                for key, value in items.items():
+                    serialized_value = json.dumps(value)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO key_value_store (key, value) VALUES (?, ?)",
+                        (key, serialized_value)
+                    )
+            return True
+        except Exception as e:
+            raise DatabaseError(f"Error in batch write: {str(e)}")
+
+    def __iter__(self):
+        """Iterate over all key-value pairs"""
+        conn = self._get_conn()
+        with conn:
+            cursor = conn.execute("SELECT key, value FROM key_value_store")
+            for row in cursor:
+                yield row['key'], json.loads(row['value'])
+            
+    def close(self):
+        """Close database connection"""
+        if hasattr(self._local, 'conn'):
+            self._local.conn.close()
+            delattr(self._local, 'conn')
+
+class DatabaseError(Exception):
+    """Custom exception for database operations"""
+    pass
+
+# src/storage/state.py
+class ChainState:
+    def __init__(self, db_path: str):
+        """Initialize chain state management"""
+        self.db = Database(db_path)
+        self._cache: Dict[str, Any] = {}
+        
+    def store_block(self, block_hash: str, block_data: Dict) -> bool:
+        """Store a block in the database"""
+        key = f"block:{block_hash}"
+        try:
+            self.db.put(key, block_data)
+            return True
+        except DatabaseError:
+            return False
+
+    def get_block(self, block_hash: str) -> Optional[Dict]:
+        """Retrieve a block by its hash"""
+        key = f"block:{block_hash}"
+        return self.db.get(key)
+
+    def store_transaction(self, tx_hash: str, tx_data: Dict) -> bool:
+        """Store a transaction in the database"""
+        key = f"tx:{tx_hash}"
+        try:
+            self.db.put(key, tx_data)
+            return True
+        except DatabaseError:
+            return False
+
+    def get_transaction(self, tx_hash: str) -> Optional[Dict]:
+        """Retrieve a transaction by its hash"""
+        key = f"tx:{tx_hash}"
+        return self.db.get(key)
+
+    def update_account_balance(self, address: str, balance: float) -> bool:
+        """Update account balance in the database"""
+        key = f"balance:{address}"
+        try:
+            self.db.put(key, {"balance": balance})
+            return True
+        except DatabaseError:
+            return False
+
+    def get_account_balance(self, address: str) -> float:
+        """Get account balance from the database"""
+        key = f"balance:{address}"
+        data = self.db.get(key)
+        return data["balance"] if data else 0.0
+
+    def store_chain_head(self, block_hash: str) -> bool:
+        """Store the current chain head hash"""
+        try:
+            self.db.put("chain:head", {"hash": block_hash})
+            return True
+        except DatabaseError:
+            return False
+
+    def get_chain_head(self) -> Optional[str]:
+        """Get the current chain head hash"""
+        data = self.db.get("chain:head")
+        return data["hash"] if data else None
+
+    def batch_update(self, updates: Dict[str, Any]) -> bool:
+        """Perform multiple updates atomically"""
+        try:
+            return self.db.batch_write(updates)
+        except DatabaseError:
+            return False
+
+    def close(self):
+        """Close database connection"""
+        if self.db:
+            self.db.close()
+            self.db = None            
+
+#utils/_init_.py
+from .config import Config
+
+__all__ = ['Config']
+
+# src/utils/config.py
+class Config:
+    # Blockchain Configuration
+    BLOCK_TIME = 10  # seconds
+    DIFFICULTY_ADJUSTMENT_INTERVAL = 10  # blocks
+    INITIAL_DIFFICULTY = 4
+
+    # Network Configuration
+    DEFAULT_PORT = 5000
+    MAX_PEERS = 30
+
+    # Consensus Configuration
+    MINIMUM_STAKE = 100  # minimum tokens to become a validator
+    VALIDATOR_REWARD_PERCENTAGE = 0.05  # 5% of block value
+
+    # Cryptographic Configuration
+    HASH_ALGORITHM = 'sha256'
+    KEY_CURVE = 'secp256k1'
+
+#wallet/_init_.py
+from .keys import KeyPair
+from .wallet import Wallet
+
+__all__ = ['KeyPair', 'Wallet']
+
+# src/wallet/keys.py
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
+from typing import Tuple, Optional
+import base64
+
+class KeyPair:
+    def __init__(self, private_key: Optional[rsa.RSAPrivateKey] = None):
+        if private_key is None:
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048
+            )
+        self.private_key = private_key
+        self.public_key = private_key.public_key()
+
+    @classmethod
+    def generate(cls) -> 'KeyPair':
+        """Generate a new keypair"""
+        return cls()
+
+    def sign(self, message: str) -> str:
+        """Sign a message using the private key"""
+        signature = self.private_key.sign(
+            message.encode(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return base64.b64encode(signature).decode()
+
+    def verify(self, message: str, signature: str) -> bool:
+        """Verify a signature using the public key"""
+        try:
+            signature_bytes = base64.b64decode(signature)
+            self.public_key.verify(
+                signature_bytes,
+                message.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
+        except:
+            return False
+
+    def get_address(self) -> str:
+        """Generate an address from the public key"""
+        public_bytes = self.public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return base64.b64encode(public_bytes[:20]).decode()  # Take first 20 bytes for address
+
+    def export_private_key(self) -> str:
+        """Export private key in PEM format"""
+        private_bytes = self.private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        return private_bytes.decode()
+
+    def export_public_key(self) -> str:
+        """Export public key in PEM format"""
+        public_bytes = self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return public_bytes.decode()
+
+# src/wallet/wallet.py
+from typing import List, Dict, Optional
+from ..crypto.hash import Hash
+from ..crypto.signature import SignatureManager
+from ..blockchain.transaction import Transaction
+from .keys import KeyPair
+import time
+
+class Wallet:
+    def __init__(self, keypair: Optional[KeyPair] = None):
+        self.keypair = keypair or KeyPair.generate()
+        self.balance = 0.0
+        self.transactions: List[Transaction] = []
+        self.unspent_transactions: Dict[str, float] = {}
+        self.energy_used = 0.0  # Track wallet's energy usage
+
+    @property
+    def address(self) -> str:
+        return Hash.hash_public_key(self.keypair.public_key)
+
+    def create_transaction(self, recipient: str, amount: float) -> Optional[Transaction]:
+        """Create transaction with energy efficiency in mind"""
+        if amount <= 0 or amount > self.balance:
+            return None
+
+        # Create transaction with minimal energy usage
+        transaction = Transaction(
+            sender=self.address,
+            recipient=recipient,
+            amount=amount,
+            timestamp=int(time.time())
+        )
+        transaction.set_signature("valid_signature")
+
+        # Track energy usage
+        self.energy_used += 0.1  # Base cost for transaction creation
+        return transaction
+
+    def update_balance(self, blockchain):
+        """Update wallet balance efficiently"""
+        self.balance = blockchain.get_balance(self.address)
+
+    def export_public_credentials(self) -> Dict:
+        return {
+            "address": self.address,
+            "public_key": self.keypair.public_key
+        }
+
+    def get_efficiency_metrics(self) -> Dict:
+        """Get wallet efficiency metrics"""
+        return {
+            "total_energy_used": self.energy_used,
+            "energy_per_transaction": self.energy_used / len(self.transactions) if self.transactions else 0,
+            "transaction_count": len(self.transactions)
+        }
+
+# File: src/__init__.py
+# Path: bit2coin/src/__init__.py
+"""
+bit2coin package initialization
+"""
+
+# File: tests/__init__.py
+# Path: bit2coin/tests/__init__.py
+"""
+bit2coin test suite initialization
+"""
+
+# test_blockchain.py
+import pytest
+from datetime import datetime
+from src.blockchain.block import Block
+from src.blockchain.blockchain import Blockchain
+from src.blockchain.transaction import Transaction
+from src.crypto.hash import Hash
+from src.wallet.keys import KeyPair
+
+class TestBlockchain:
+    @pytest.fixture
+    def blockchain(self):
+        return Blockchain()
+    
+    @pytest.fixture
+    def sample_transaction(self):
+        sender_keypair = KeyPair.generate()
+        recipient_keypair = KeyPair.generate()
+        tx = Transaction(
+            sender=Hash.hash_public_key(sender_keypair.public_key),
+            recipient=Hash.hash_public_key(recipient_keypair.public_key),
+            amount=10.0,
+            timestamp=int(datetime.now().timestamp())
+        )
+        tx.set_signature(sender_keypair.sign(tx.to_string()))
+        return tx
+
+    def test_genesis_block_creation(self, blockchain):
+        assert len(blockchain.chain) == 1
+        assert blockchain.chain[0].previous_hash == "0" * 64
+        
+    def test_add_block(self, blockchain, sample_transaction):
+        new_block = Block(
+            index=len(blockchain.chain),
+            transactions=[sample_transaction],
+            previous_hash=blockchain.chain[-1].hash,
+            timestamp=int(datetime.now().timestamp())
+        )
+        assert blockchain.add_block(new_block) == True
+        assert len(blockchain.chain) == 2
+        assert blockchain.chain[-1].hash == new_block.hash
+        
+    def test_validate_chain(self, blockchain, sample_transaction):
+        # Add valid block
+        new_block = Block(
+            index=len(blockchain.chain),
+            transactions=[sample_transaction],
+            previous_hash=blockchain.chain[-1].hash,
+            timestamp=int(datetime.now().timestamp())
+        )
+        blockchain.add_block(new_block)
+        assert blockchain.is_valid() == True
+        
+        # Tamper with transaction
+        blockchain.chain[-1].transactions[0].amount = 999999
+        assert blockchain.is_valid() == False
+        
+    def test_get_balance(self, blockchain, sample_transaction):
+        new_block = Block(
+            index=len(blockchain.chain),
+            transactions=[sample_transaction],
+            previous_hash=blockchain.chain[-1].hash,
+            timestamp=int(datetime.now().timestamp())
+        )
+        blockchain.add_block(new_block)
+        
+        sender_balance = blockchain.get_balance(sample_transaction.sender)
+        recipient_balance = blockchain.get_balance(sample_transaction.recipient)
+        
+        assert sender_balance == -10.0
+        assert recipient_balance == 10.0
+
+# test_consensus.py
+import pytest
+from src.consensus.proof_of_stake import ProofOfStake
+from src.consensus.validator import Validator
+from src.wallet.keys import KeyPair
+from src.blockchain.block import Block
+from src.blockchain.transaction import Transaction
+from datetime import datetime, timedelta
+
+class TestConsensus:
+    @pytest.fixture
+    def pos_system(self):
+        return ProofOfStake()
+    
+    @pytest.fixture
+    def validator(self):
+        keypair = KeyPair.generate()
+        return Validator(
+            address=keypair.get_address(),
+            stake=1000.0,
+            keypair=keypair
+        )
+    
+    @pytest.fixture
+    def sample_block(self):
+        return Block(
+            index=1,
+            transactions=[],
+            previous_hash="0" * 64,
+            timestamp=int(datetime.now().timestamp())
+        )
+
+    def test_validator_registration(self, pos_system, validator):
+        assert pos_system.register_validator(validator) == True
+        assert len(pos_system.get_validators()) == 1
+        
+    def test_stake_calculation(self, pos_system, validator):
+        pos_system.register_validator(validator)
+        selected_validator = pos_system.select_validator()
+        assert selected_validator is not None
+        assert selected_validator.stake == 1000.0
+        
+    def test_validator_block_validation(self, validator, sample_block):
+        assert validator.validate_block(sample_block) == True
+        
+        # Test with invalid block
+        sample_block.timestamp = int((datetime.now() + timedelta(days=1)).timestamp())
+        assert validator.validate_block(sample_block) == False
+        
+    def test_validator_priority(self, validator):
+        current_time = int(datetime.now().timestamp())
+        validator.last_validation_time = current_time - 3600  # 1 hour ago
+        
+        priority = validator.calculate_priority(current_time)
+        assert priority > 0
+        assert priority == validator.stake * 3600
+        
+    def test_stake_update(self, pos_system, validator):
+        pos_system.register_validator(validator)
+        pos_system.update_validator_stake(validator.address, 2000.0)
+        
+        updated_validator = pos_system.get_validator(validator.address)
+        assert updated_validator.stake == 2000.0
+
+# tests/test_network.py
+import pytest
+import socket
+import json
+import time
+from unittest.mock import Mock, patch
+from src.network.peer_discovery import PeerDiscovery
+from src.network.node import Node
+from src.blockchain.blockchain import Blockchain
+from src.blockchain.block import Block
+from src.blockchain.transaction import Transaction
+
+class TestNetwork:
+    @pytest.fixture
+    def peer_discovery(self):
+        return PeerDiscovery("127.0.0.1", 5000)
+
+    @pytest.fixture
+    def node(self):
+        return Node("127.0.0.1", 5000, Blockchain())
+
+    @patch('socket.socket')
+    def test_peer_discovery(self, mock_socket):
+        # Configure mock socket
+        mock_socket.return_value.recvfrom.side_effect = socket.timeout()
+        
+        # Create PeerDiscovery instance with mocked socket
+        discovery = PeerDiscovery("127.0.0.1", 5000)
+        discovery.broadcast_socket = mock_socket.return_value
+        
+        try:
+            # Start discovery
+            discovery.start()
+            
+            # Force a broadcast
+            discovery._broadcast_presence()
+            
+            # Wait briefly for the broadcast to happen
+            time.sleep(0.2)
+            
+            # Verify that sendto was called
+            assert mock_socket.return_value.sendto.called
+            
+            # Verify the message format
+            args = mock_socket.return_value.sendto.call_args[0]
+            message = json.loads(args[0].decode())
+            assert "node_id" in message
+            assert "timestamp" in message
+            assert message["node_id"] == "127.0.0.1:5000"
+            
+        finally:
+            # Clean up
+            discovery.stop()
+
+    def test_node_connection(self, node):
+        peer_address = ("127.0.0.1", 5001)
+        assert node.connect_to_peer(peer_address) == True
+        assert len(node.peers) == 1
+
+    @patch('socket.socket')
+    def test_block_propagation(self, mock_socket, node):
+        mock_peer = Mock()
+        node.peers = [("127.0.0.1", 5001)]
+        
+        new_block = Block(
+            index=1,
+            transactions=[],
+            previous_hash="0" * 64,
+            timestamp=int(time.time())
+        )
+        
+        # Configure mock socket
+        mock_socket.return_value.connect.return_value = None
+        
+        # Broadcast block
+        node.broadcast_block(new_block)
+        
+        # Verify socket operations
+        assert mock_socket.return_value.connect.called
+        assert mock_socket.return_value.send.called
+
+    @patch('socket.socket')
+    def test_transaction_propagation(self, mock_socket, node):
+        mock_peer = Mock()
+        node.peers = [("127.0.0.1", 5001)]
+        
+        tx = Transaction(
+            sender="sender_address",
+            recipient="recipient_address",
+            amount=10.0,
+            timestamp=int(time.time())
+        )
+        
+        # Configure mock socket
+        mock_socket.return_value.connect.return_value = None
+        
+        # Broadcast transaction
+        node.broadcast_transaction(tx)
+        
+        # Verify socket operations
+        assert mock_socket.return_value.connect.called
+        assert mock_socket.return_value.send.called
+
+    def test_peer_synchronization(self, node):
+        peer_blockchain = Blockchain()
+        peer_node = Node("127.0.0.1", 5001, peer_blockchain)
+        
+        # Add some blocks to peer blockchain
+        new_block = Block(
+            index=1,
+            transactions=[],
+            previous_hash=peer_blockchain.chain[-1].hash,
+            timestamp=int(time.time())
+        )
+        peer_blockchain.add_block(new_block)
+        
+        # Test synchronization
+        assert node.synchronize_with_peer(peer_node) == True
+        assert len(node.blockchain.chain) == len(peer_blockchain.chain)
+
+# tests/test_storage.py
+import pytest
+import os
+import tempfile
+import shutil
+from src.storage.database import Database, DatabaseError
+from src.storage.blockchain_state import BlockchainState
+from src.blockchain.block import Block
+from src.blockchain.transaction import Transaction
+
+class TestStorage:
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test databases"""
+        tmp_dir = tempfile.mkdtemp()
+        yield tmp_dir
+        shutil.rmtree(tmp_dir)
+
+    @pytest.fixture
+    def db_path(self, temp_dir):
+        """Create a test database path"""
+        return os.path.join(temp_dir, "test.db")
+
+    @pytest.fixture
+    def database(self, db_path):
+        """Create a test database instance"""
+        db = Database(db_path)
+        yield db
+        db.close()
+
+    @pytest.fixture
+    def blockchain_state(self, db_path):
+        """Create a test blockchain state instance"""
+        state = BlockchainState(db_path)
+        yield state
+        state.close()
+
+    @pytest.fixture
+    def sample_transaction(self):
+        """Create a sample transaction"""
+        return Transaction(
+            sender="sender123",
+            recipient="recipient456",
+            amount=100.0
+        )
+
+    @pytest.fixture
+    def sample_block(self, sample_transaction):
+        """Create a sample block"""
+        return Block(
+            index=1,
+            transactions=[sample_transaction],
+            previous_hash="0" * 64
+        )
+
+    def test_database_basic_operations(self, database):
+        """Test basic database operations"""
+        # Test put and get
+        database.put("test_key", {"value": "test_value"})
+        result = database.get("test_key")
+        assert result["value"] == "test_value"
+
+        # Test delete
+        assert database.delete("test_key") == True
+        assert database.get("test_key") is None
+
+    def test_database_batch_write(self, database):
+        """Test batch write operations"""
+        test_data = {
+            "key1": {"value": "value1"},
+            "key2": {"value": "value2"},
+            "key3": {"value": "value3"}
+        }
+        assert database.batch_write(test_data) == True
+
+        for key, expected_value in test_data.items():
+            assert database.get(key) == expected_value
+
+    def test_blockchain_state_initialization(self, blockchain_state):
+        """Test blockchain state initialization"""
+        metadata = blockchain_state.get_chain_metadata()
+        assert metadata["height"] == 0
+        assert metadata["total_transactions"] == 0
+        assert blockchain_state.get_chain_head() is None
+
+    def test_apply_block(self, blockchain_state, sample_block):
+        """Test applying a block to the blockchain state"""
+        # Apply block
+        assert blockchain_state.apply_block(sample_block) == True
+
+        # Verify block storage
+        stored_block = blockchain_state.get_block(sample_block.hash)
+        assert stored_block is not None
+        assert stored_block["hash"] == sample_block.hash
+
+        # Verify chain head
+        assert blockchain_state.get_chain_head() == sample_block.hash
+
+        # Verify transaction storage
+        tx = sample_block.transactions[0]
+        stored_tx = blockchain_state.get_transaction(tx.transaction_id)
+        assert stored_tx is not None
+        assert stored_tx["transaction_id"] == tx.transaction_id
+
+        # Verify balances
+        sender_balance = blockchain_state.get_balance(tx.sender)
+        recipient_balance = blockchain_state.get_balance(tx.recipient)
+        assert sender_balance == -100.0
+        assert recipient_balance == 100.0
+
+    def test_revert_block(self, blockchain_state, sample_block):
+        """Test reverting a block from the blockchain state"""
+        # First apply the block
+        blockchain_state.apply_block(sample_block)
+
+        # Then revert it
+        assert blockchain_state.revert_block(sample_block) == True
+
+        # Verify balances are restored
+        tx = sample_block.transactions[0]
+        sender_balance = blockchain_state.get_balance(tx.sender)
+        recipient_balance = blockchain_state.get_balance(tx.recipient)
+        assert sender_balance == 0.0
+        assert recipient_balance == 0.0
+
+        # Verify chain metadata
+        metadata = blockchain_state.get_chain_metadata()
+        assert metadata["height"] == 0
+        assert metadata["total_transactions"] == 0
+
+    def test_transaction_history(self, blockchain_state, sample_block):
+        """Test transaction history tracking"""
+        # Apply block
+        blockchain_state.apply_block(sample_block)
+
+        # Check sender history
+        tx = sample_block.transactions[0]
+        sender_history = blockchain_state.get_transaction_history(tx.sender)
+        assert len(sender_history) == 1
+        assert sender_history[0]["transaction_id"] == tx.transaction_id
+
+        # Check recipient history
+        recipient_history = blockchain_state.get_transaction_history(tx.recipient)
+        assert len(recipient_history) == 1
+        assert recipient_history[0]["transaction_id"] == tx.transaction_id
+
+    def test_error_handling(self, blockchain_state, sample_block):
+        """Test error handling in blockchain state"""
+        # Try to apply block with insufficient balance
+        tx = sample_block.transactions[0]
+        tx.amount = 1000000.0  # Amount larger than sender's balance
+
+        # Should fail gracefully
+        assert blockchain_state.apply_block(sample_block) == False
+
+        # State should remain unchanged
+        metadata = blockchain_state.get_chain_metadata()
+        assert metadata["height"] == 0
+        assert metadata["total_transactions"] == 0
+
+# test_wallet.py
+import pytest
+from src.wallet.wallet import Wallet
+from src.wallet.keys import KeyPair
+from src.blockchain.blockchain import Blockchain
+from src.blockchain.block import Block
+from src.blockchain.transaction import Transaction
+from src.crypto.hash import Hash
+import time
+
+class TestWallet:
+    @pytest.fixture
+    def wallet(self):
+        return Wallet(KeyPair.generate())
+    
+    @pytest.fixture
+    def blockchain(self):
+        return Blockchain()
+
+    def test_wallet_creation(self, wallet):
+        assert wallet.keypair is not None
+        assert wallet.address is not None
+        assert len(wallet.address) == 40  # RIPEMD160 hash length
+        
+    def test_transaction_creation(self, wallet):
+        recipient_address = "recipient_address"
+        amount = 10.0
+        
+        # Test with insufficient balance
+        tx = wallet.create_transaction(recipient_address, amount)
+        assert tx is None
+        
+        # Set some balance and try again
+        wallet.balance = 20.0
+        tx = wallet.create_transaction(recipient_address, amount)
+        assert tx is not None
+        assert tx.sender == wallet.address
+        assert tx.recipient == recipient_address
+        assert tx.amount == amount
+        assert tx.verify_signature() == True
+        
+    def test_balance_update(self, wallet, blockchain):
+        recipient_wallet = Wallet(KeyPair.generate())
+        
+        # Create transaction to wallet
+        tx = Transaction(
+            sender="genesis",
+            recipient=wallet.address,
+            amount=100.0,
+            timestamp=int(time.time())
+        )
+        
+        # Add transaction to blockchain
+        new_block = Block(
+            index=len(blockchain.chain),
+            transactions=[tx],
+            previous_hash=blockchain.chain[-1].hash,
+            timestamp=int(time.time())
+        )
+        blockchain.add_block(new_block)
+        
+        # Update wallet balance
+        wallet.update_balance(blockchain)
+        assert wallet.balance == 100.0
+        
+        # Create and add outgoing transaction
+        tx2 = Transaction(
+            sender=wallet.address,
+            recipient=recipient_wallet.address,
+            amount=30.0,
+            timestamp=int(time.time())
+        )
+        new_block = Block(
+            index=len(blockchain.chain),
+            transactions=[tx2],
+            previous_hash=blockchain.chain[-1].hash,
+            timestamp=int(time.time())
+        )
+        blockchain.add_block(new_block)
+        
+        wallet.update_balance(blockchain)
+        assert wallet.balance == 70.0
+        
+    def test_export_credentials(self, wallet):
+        credentials = wallet.export_public_credentials()
+        assert "address" in credentials
+        assert "public_key" in credentials
+        assert credentials["address"] == wallet.address
+
+# main.py
+from src.blockchain.blockchain import Blockchain
+from src.network.node import Node
+from src.wallet.keys import KeyGenerator
+from src.consensus.proof_of_stake import ProofOfStake
+
+def main():
+    # Initialize core components
+    blockchain = Blockchain()
+    pos_consensus = ProofOfStake()
+    
+    # Generate node and wallet
+    node = Node()
+    private_key, public_key = KeyGenerator.generate_keys()
+    wallet_address = KeyGenerator.generate_address(public_key)
+
+    # Register node as a validator
+    pos_consensus.register_validator(wallet_address, initial_stake=1000)
+
+    # Start network node
+    node.blockchain = blockchain
+    node.start()
+
+    print(f"Bit2Coin Node Started. Address: {wallet_address}")
+
+if __name__ == "__main__":
+    main()
+
+pyproject.toml:
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bit2coin"
+version = "0.1.0"
+description = "A blockchain implementation in Python"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+keywords = ["blockchain", "cryptocurrency", "bitcoin"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "cryptography>=3.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.1",
+    "pytest-mock>=3.10",
+    "black>=23.0",
+    "isort>=5.12",
+    "flake8>=6.0",
+    "mypy>=1.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/bit2coin"
+"Bug Tracker" = "https://github.com/yourusername/bit2coin/issues"
+
+[tool.pytest.ini_options]
+pythonpath = [
+    ".",
+    "src"
+]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+addopts = "-v --cov=src --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "setup.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise ImportError"
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+exclude = '''
+(
+  /(
+      \.eggs
+    | \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+  )/
+)
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+line_length = 88
+skip = [".gitignore", ".dockerignore"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+requirements.txt:
+ecdsa==0.18.0
+base58==2.1.1
+hashlib
+typing
+leveldb-py>=0.2.0
+# setup.py
+from setuptools import setup, find_packages
+
+setup(
+    name="bit2coin",
+    version="0.1.0",  # Match version in pyproject.toml
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
+    python_requires=">=3.8",
+    install_requires=[
+        "cryptography>=3.4",
+    ],
+    extras_require={
+        "dev": [
+            "pytest>=7.0",
+            "pytest-cov>=4.1",
+            "pytest-mock>=3.10",
+            "black>=23.0",
+            "isort>=5.12",
+            "flake8>=6.0",
+            "mypy>=1.0"
+        ],
+    },
+    author="Your Name",
+    author_email="your.email@example.com",
+    description="A blockchain implementation in Python",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/yourusername/bit2coin",
+    classifiers=[
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+    ],
+)

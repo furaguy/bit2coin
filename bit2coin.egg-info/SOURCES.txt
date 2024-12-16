@@ -1,0 +1,12 @@
+pyproject.toml
+setup.py
+bit2coin.egg-info/PKG-INFO
+bit2coin.egg-info/SOURCES.txt
+bit2coin.egg-info/dependency_links.txt
+bit2coin.egg-info/requires.txt
+bit2coin.egg-info/top_level.txt
+src/__init__.py
+tests/test_blockchain.py
+tests/test_consensus.py
+tests/test_network.py
+tests/test_wallet.py

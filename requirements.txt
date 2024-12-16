@@ -1,0 +1,36 @@
+ecdsa==0.18.0
+base58==2.1.1
+hashlib
+typing
+leveldb-py>=0.2.0
+# File: requirements.txt
+
+# Core dependencies
+aiohttp>=3.8.0
+async-timeout>=4.0.0
+miniupnpc>=2.0.2
+websockets>=10.0
+pyyaml>=6.0
+prometheus-client>=0.16.0
+psutil>=5.9.0
+
+# Testing dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.18.0
+pytest-mock>=3.10.0
+
+# Security dependencies
+ecdsa>=0.18.0
+cryptography>=39.0.0
+
+# Development dependencies
+pylint>=2.17.0
+black>=23.3.0
+mypy>=1.3.0
+
+fastapi==0.68.1
+uvicorn==0.15.0
+web3==5.24.0
+eth-account==0.5.6
+cryptography==3.4.8
+pydantic==1.8.2
