@@ -15,8 +15,8 @@ class TransactionType(Enum):
     TRANSFER = "transfer"
     STAKE = "stake"
     UNSTAKE = "unstake"
-    GENESIS = "genesis"  # Added for genesis transactions
-    MINING_REWARD = "mining_reward"  # Added for mining rewards
+    GENESIS = "genesis"
+    MINING_REWARD = "mining_reward"
 
 @dataclass
 class TransactionData:
@@ -26,7 +26,7 @@ class TransactionData:
     delegation_amount: Optional[Decimal] = None
     reward_share: Optional[Decimal] = None
     unbonding_time: Optional[int] = None
-    genesis_message: Optional[str] = None  # Added for genesis message
+    genesis_message: Optional[str] = None
 
 class Transaction:
     def __init__(
@@ -37,7 +37,7 @@ class Transaction:
         transaction_type: TransactionType = TransactionType.TRANSFER,
         data: Optional[Dict[str, Any]] = None, 
         timestamp: Optional[int] = None,
-        message: Optional[str] = None  # Added for genesis message
+        message: Optional[str] = None
     ):
         self.sender = sender
         self.recipient = recipient
@@ -170,3 +170,18 @@ class Transaction:
             f"{self.message or ''}"
             f"{str(self.data.__dict__) if self.data else ''}"
         )
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Transaction':
+        """Create transaction from dictionary"""
+        tx = cls(
+            sender=data["sender"],
+            recipient=data["recipient"],
+            amount=Decimal(data["amount"]),
+            transaction_type=TransactionType(data["type"]),
+            timestamp=data["timestamp"],
+            message=data.get("message")
+        )
+        if data.get("signature"):
+            tx.set_signature(data["signature"])
+        return tx

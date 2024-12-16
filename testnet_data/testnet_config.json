@@ -1,0 +1,53 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "host": "127.0.0.1",
+      "port": 5000
+    },
+    {
+      "id": 1,
+      "host": "127.0.0.1",
+      "port": 5001
+    },
+    {
+      "id": 2,
+      "host": "127.0.0.1",
+      "port": 5002
+    }
+  ],
+  "genesis_block": {
+    "height": 0,
+    "previous_hash": "0",
+    "transactions": [
+      {
+        "transaction_id": "b8c1b9c9de662d799d83cb223984534b456825689b155f48cdfb66678164320b",
+        "sender": "0",
+        "recipient": "1Gd1UHMGaQHAimxYd8xyX7ZPJJNAmeDAW1",
+        "amount": "50",
+        "timestamp": 1734376066,
+        "type": "transfer",
+        "data": null,
+        "message": "bitcoin aged fine!",
+        "signature": null
+      },
+      {
+        "transaction_id": "c2a52c6a8eaa014f6c5b8af422347cd1b6614884cc508933c714ef6dc0efb3fb",
+        "sender": "0",
+        "recipient": "16232XzTwAsJmcWib2zgKMZKbpGvGu71VY",
+        "amount": "150",
+        "timestamp": 1734376066,
+        "type": "transfer",
+        "data": null,
+        "message": null,
+        "signature": null
+      }
+    ],
+    "timestamp": 1734376066,
+    "validator": null,
+    "version": 1,
+    "merkle_root": "126fa336fa4180202ed63da382fbe0b0ba3995a78b7533cf289b16c7c2f7a393",
+    "hash": "82df3a2926d2ec7d9bcf054ff41ba84d127da9e05af71f8fa420a2bc359be3c6",
+    "size": 543
+  }
+}

@@ -5,7 +5,7 @@ import time
 import hashlib
 import json
 from decimal import Decimal
-from .transaction import Transaction
+from src.blockchain.transaction import Transaction
 
 @dataclass
 class BlockHeader:

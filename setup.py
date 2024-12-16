@@ -1,5 +1,15 @@
 # setup.py
 from setuptools import setup, find_packages
+from pathlib import Path
+
+# Get project root directory
+root = Path(__file__).parent
+
+# Handle README content (with fallback if file doesn't exist)
+try:
+    long_description = (root / "README.md").read_text()
+except FileNotFoundError:
+    long_description = "Bit2Coin - A blockchain implementation in Python"
 
 setup(
     name="bit2coin",
@@ -13,7 +23,6 @@ setup(
         "uvicorn>=0.15.0",
         "web3>=5.24.0",
         "eth-account>=0.5.6",
-        "cryptography>=3.4.8",
         "pydantic>=1.8.2",
     ],
     extras_require={
@@ -30,7 +39,7 @@ setup(
     author="Your Name",
     author_email="your.email@example.com",
     description="A blockchain implementation in Python",
-    long_description=open("README.md").read(),
+    long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/yourusername/bit2coin",
     classifiers=[

@@ -7,13 +7,13 @@ from decimal import Decimal
 import sys
 from pathlib import Path
 
-# Add parent directory to path so we can import our modules
-sys.path.append(str(Path(__file__).parent.parent))
+# Add project root to path
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from blockchain.blockchain import Blockchain
-from blockchain.block import Block
-from network.node import Node
-from blockchain.transaction import Transaction
+from src.blockchain.blockchain import Blockchain
+from src.blockchain.block import Block
+from src.network.node import Node
+from src.blockchain.transaction import Transaction, TransactionType
 import logging
 
 class TestnetSetup:
@@ -61,7 +61,7 @@ class TestnetSetup:
             sender="0",
             recipient="TestnetGenesis",
             amount=Decimal("1000000"),
-            transaction_type="genesis"
+            transaction_type=TransactionType.GENESIS
         )
         
         # Create genesis block
