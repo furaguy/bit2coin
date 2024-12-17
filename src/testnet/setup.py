@@ -5,6 +5,8 @@ import json
 import argparse
 from decimal import Decimal
 import sys
+import threading
+import time
 from pathlib import Path
 
 # Add project root to path
@@ -118,11 +120,31 @@ class TestnetSetup:
     def start_testnet(self):
         """Start all testnet nodes"""
         self.logger.info("Starting testnet nodes")
-        for node in self.test_nodes:
+        node_threads = []
+        
+        for i, node in enumerate(self.test_nodes):
             try:
-                node.start()
+                self.logger.info(f"Starting node {i} on port {node.port}")
+                thread = threading.Thread(target=node.start)
+                thread.daemon = False
+                node_threads.append(thread)
+                thread.start()
+                self.logger.info(f"Successfully started node {i}")
             except Exception as e:
-                self.logger.error(f"Failed to start node on port {node.port}: {str(e)}")
+                self.logger.error(f"Failed to start node {i} on port {node.port}: {str(e)}")
+                self.logger.exception(e)
+
+        # Keep the main thread running
+        try:
+            while True:
+                time.sleep(1)
+                self._check_node_status()
+        except KeyboardInterrupt:
+            self.logger.info("Stopping testnet...")
+            for node in self.test_nodes:
+                node.stop()
+            for thread in node_threads:
+                thread.join()
 
     def stop_testnet(self):
         """Stop all testnet nodes"""
@@ -132,6 +154,15 @@ class TestnetSetup:
                 node.stop()
             except Exception as e:
                 self.logger.error(f"Error stopping node on port {node.port}: {str(e)}")
+
+    def _check_node_status(self):
+        """Check status of all nodes"""
+        for i, node in enumerate(self.test_nodes):
+            try:
+                status = node.get_node_status()
+                self.logger.debug(f"Node {i} status: {status}")
+            except Exception as e:
+                self.logger.error(f"Error checking node {i} status: {str(e)}")
 
 def main():
     parser = argparse.ArgumentParser(description="Bit2Coin Testnet Setup")
@@ -144,7 +175,7 @@ def main():
     parser.add_argument(
         "--base-port", 
         type=int, 
-        default=5000,
+        default=6000,
         help="Base port number for nodes"
     )
     parser.add_argument(

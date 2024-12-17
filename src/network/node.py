@@ -7,7 +7,7 @@ import time
 from typing import List, Dict, Optional, Tuple, Set
 from ..blockchain.blockchain import Blockchain
 from ..blockchain.block import Block
-from ..blockchain.transaction import Transaction
+from ..blockchain.transaction import Transaction, TransactionType
 from ..utils.logger import get_logger
 
 class Node:
@@ -32,7 +32,11 @@ class Node:
         self.chain_lock = threading.Lock()
         self.peers_lock = threading.Lock()
         
-        # Message handlers
+        # Initialize handlers after methods are defined
+        self._initialize_handlers()
+
+    def _initialize_handlers(self):
+        """Initialize message handlers after all methods are defined"""
         self.message_handlers = {
             "block": self._handle_block_message,
             "transaction": self._handle_transaction_message,
@@ -52,11 +56,19 @@ class Node:
             self.logger.info(f"Node listening on {self.host}:{self.port}")
             
             # Start connection handler thread
-            threading.Thread(target=self._handle_connections, daemon=True).start()
+            connection_handler = threading.Thread(target=self._handle_connections)
+            connection_handler.daemon = False
+            connection_handler.start()
             
             # Start peer discovery thread
-            threading.Thread(target=self._discover_peers, daemon=True).start()
+            peer_discovery = threading.Thread(target=self._discover_peers)
+            peer_discovery.daemon = False
+            peer_discovery.start()
             
+            # Keep the main thread alive
+            while self.running:
+                time.sleep(1)
+                
         except Exception as e:
             self.logger.error(f"Failed to start node: {str(e)}")
             self.running = False
@@ -125,94 +137,6 @@ class Node:
             self.blockchain = temp_chain
             return True
 
-    def broadcast_block(self, block: Block):
-        """Broadcast block to all peers"""
-        message = {
-            "type": "block",
-            "data": block.to_dict()
-        }
-        self._broadcast_message(message)
-
-    def broadcast_transaction(self, transaction: Transaction):
-        """Broadcast transaction to all peers"""
-        # Add to pending set to avoid rebroadcast
-        self.pending_transactions.add(transaction.transaction_id)
-        
-        message = {
-            "type": "transaction",
-            "data": transaction.to_dict()
-        }
-        self._broadcast_message(message)
-
-    def _broadcast_message(self, message: Dict):
-        """Broadcast message to all peers"""
-        with self.peers_lock:
-            dead_peers = set()
-            for peer in self.peers:
-                try:
-                    self._send_message(peer, message)
-                except ConnectionError:
-                    dead_peers.add(peer)
-                    
-            # Remove dead peers
-            self.peers -= dead_peers
-
-    def _send_message(self, peer: Tuple[str, int], message: Dict):
-        """Send message to specific peer"""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            sock.connect(peer)
-            sock.send(json.dumps(message).encode())
-        except Exception as e:
-            raise ConnectionError(f"Failed to send message to {peer}: {str(e)}")
-        finally:
-            sock.close()
-
-    def connect_to_peer(self, peer_address: Tuple[str, int]) -> bool:
-        """Connect to new peer"""
-        if peer_address == (self.host, self.port):
-            return False
-            
-        with self.peers_lock:
-            if peer_address not in self.peers:
-                # Test connection before adding
-                try:
-                    self._send_message(peer_address, {"type": "peer_request"})
-                    self.peers.add(peer_address)
-                    return True
-                except ConnectionError:
-                    return False
-                    
-        return False
-
-    def _discover_peers(self):
-        """Periodically discover new peers"""
-        while self.running:
-            try:
-                # Request peers from known peers
-                with self.peers_lock:
-                    for peer in list(self.peers):
-                        try:
-                            self._send_message(peer, {"type": "peer_request"})
-                        except ConnectionError:
-                            self.peers.remove(peer)
-            except Exception as e:
-                self.logger.error(f"Peer discovery error: {str(e)}")
-                
-            time.sleep(300)  # Run every 5 minutes
-
-    def _process_message(self, message: Dict, sender_address: Tuple[str, int]):
-        """Process received message"""
-        message_type = message.get("type")
-        if message_type in self.message_handlers:
-            try:
-                self.message_handlers[message_type](message, sender_address)
-            except Exception as e:
-                self.logger.error(f"Error processing {message_type} message: {str(e)}")
-        else:
-            self.logger.warning(f"Unknown message type: {message_type}")
-
     def _handle_block_message(self, message: Dict, sender_address: Tuple[str, int]):
         """Handle received block"""
         block_data = message.get("data")
@@ -238,7 +162,7 @@ class Node:
             return
             
         # Validate and rebroadcast
-        if transaction.verify():
+        if transaction.verify_transaction(self.blockchain):
             self.broadcast_transaction(transaction)
 
     def _handle_peer_request(self, message: Dict, sender_address: Tuple[str, int]):
@@ -259,6 +183,89 @@ class Node:
         for peer in peer_list:
             self.connect_to_peer(tuple(peer))
 
+    def _process_message(self, message: Dict, sender_address: Tuple[str, int]):
+        """Process received message"""
+        message_type = message.get("type")
+        if message_type in self.message_handlers:
+            try:
+                self.message_handlers[message_type](message, sender_address)
+            except Exception as e:
+                self.logger.error(f"Error processing {message_type} message: {str(e)}")
+        else:
+            self.logger.warning(f"Unknown message type: {message_type}")
+
+    def broadcast_block(self, block: Block):
+        """Broadcast block to all peers"""
+        message = {
+            "type": "block",
+            "data": block.to_dict()
+        }
+        self._broadcast_message(message)
+
+    def broadcast_transaction(self, transaction: Transaction):
+        """Broadcast transaction to all peers"""
+        self.pending_transactions.add(transaction.transaction_id)
+        message = {
+            "type": "transaction",
+            "data": transaction.to_dict()
+        }
+        self._broadcast_message(message)
+
+    def _broadcast_message(self, message: Dict):
+        """Broadcast message to all peers"""
+        with self.peers_lock:
+            dead_peers = set()
+            for peer in self.peers:
+                try:
+                    self._send_message(peer, message)
+                except ConnectionError:
+                    dead_peers.add(peer)
+                    
+            self.peers -= dead_peers
+
+    def _send_message(self, peer: Tuple[str, int], message: Dict):
+        """Send message to specific peer"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect(peer)
+            sock.send(json.dumps(message).encode())
+        except Exception as e:
+            raise ConnectionError(f"Failed to send message to {peer}: {str(e)}")
+        finally:
+            sock.close()
+
+    def connect_to_peer(self, peer_address: Tuple[str, int]) -> bool:
+        """Connect to new peer"""
+        if peer_address == (self.host, self.port):
+            return False
+            
+        with self.peers_lock:
+            if peer_address not in self.peers:
+                try:
+                    self._send_message(peer_address, {"type": "peer_request"})
+                    self.peers.add(peer_address)
+                    return True
+                except ConnectionError:
+                    return False
+                    
+        return False
+
+    def _discover_peers(self):
+        """Periodically discover new peers"""
+        while self.running:
+            try:
+                with self.peers_lock:
+                    for peer in list(self.peers):
+                        try:
+                            self._send_message(peer, {"type": "peer_request"})
+                        except ConnectionError:
+                            self.peers.remove(peer)
+            except Exception as e:
+                self.logger.error(f"Peer discovery error: {str(e)}")
+                
+            time.sleep(300)  # Run every 5 minutes
+
     def get_node_status(self) -> Dict:
         """Get current node status"""
         return {
@@ -267,3 +274,16 @@ class Node:
             "chain_length": len(self.blockchain.chain),
             "pending_transactions": len(self.pending_transactions)
         }
+
+    def get_transaction_status(self, tx_id: str) -> Optional[str]:
+        """Get status of a transaction"""
+        if tx_id in self.pending_transactions:
+            return "pending"
+            
+        # Check if transaction is in blockchain
+        for block in self.blockchain.chain:
+            for tx in block.transactions:
+                if tx.transaction_id == tx_id:
+                    return "confirmed"
+                    
+        return None
