@@ -32,18 +32,39 @@ class Node:
         self.chain_lock = threading.Lock()
         self.peers_lock = threading.Lock()
         
-        # Initialize handlers after methods are defined
-        self._initialize_handlers()
-
-    def _initialize_handlers(self):
-        """Initialize message handlers after all methods are defined"""
+        # Message handlers
         self.message_handlers = {
             "block": self._handle_block_message,
             "transaction": self._handle_transaction_message,
             "peer_request": self._handle_peer_request,
             "peer_response": self._handle_peer_response,
+            "transaction_status": self._handle_transaction_status,
+            "node_status": self._handle_node_status,
         }
 
+    def _handle_node_status(self, message: Dict, sender_address: Tuple[str, int]) -> Dict:
+        """Handle node status request"""
+        try:
+            status = {
+            "address": f"{self.host}:{self.port}",
+            "peers": len(self.peers),
+            "chain_length": len(self.blockchain.chain),
+            "pending_transactions": len(self.pending_transactions),
+            "running": self.running,
+            "last_block": self.blockchain.chain[-1].to_dict() if self.blockchain.chain else None
+            }
+        
+            return {
+                "type": "node_status_response",
+                "data": status
+            }
+                
+        except Exception as e:
+            self.logger.error(f"Error handling node status request: {str(e)}")
+            return {
+                "type": "error",
+                "data": {"error": str(e)}
+            }
     def start(self):
         """Start the node's server"""
         self.running = True
@@ -97,20 +118,13 @@ class Node:
     def _handle_client(self, client_socket: socket.socket, address: Tuple[str, int]):
         """Handle individual client connection"""
         try:
-            # Set timeout to prevent hanging
             client_socket.settimeout(5)
-            
-            # Receive data
-            data = b""
-            while True:
-                chunk = client_socket.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
-                
+            data = client_socket.recv(4096)
             if data:
                 message = json.loads(data.decode())
-                self._process_message(message, address)
+                response = self._process_message(message, address)
+                if response:
+                    client_socket.send(json.dumps(response).encode())
                 
         except json.JSONDecodeError:
             self.logger.warning(f"Invalid message from {address}")
@@ -119,11 +133,50 @@ class Node:
         finally:
             client_socket.close()
 
+    def _handle_transaction_status(self, message: Dict, sender_address: Tuple[str, int]) -> Dict:
+        """Handle transaction status request"""
+        try:
+            tx_id = message.get("data", {}).get("tx_id")
+            if not tx_id:
+                return {
+                    "type": "error",
+                    "data": {"error": "Missing transaction ID"}
+                }
+                
+            # Check mempool first
+            if tx_id in self.pending_transactions:
+                status = "pending"
+            else:
+                # Check blockchain
+                status = "unknown"
+                with self.chain_lock:
+                    for block in self.blockchain.chain:
+                        for tx in block.transactions:
+                            if tx.transaction_id == tx_id:
+                                status = "confirmed"
+                                break
+                        if status == "confirmed":
+                            break
+        
+            return {
+                "type": "transaction_status_response",
+                "data": {
+                    "status": status,
+                    "tx_id": tx_id
+                }
+            }
+                
+        except Exception as e:
+            self.logger.error(f"Error handling transaction status request: {str(e)}")
+            return {
+                "type": "error",
+                "data": {"error": str(e)}
+            }
     def synchronize_with_peer(self, peer_node) -> bool:
         """Synchronize blockchain with peer"""
         with self.chain_lock:
             if len(peer_node.blockchain.chain) <= len(self.blockchain.chain):
-                return True  # Already up to date
+                return True
                 
             # Create a temporary blockchain for validation
             temp_chain = copy.deepcopy(self.blockchain)
@@ -137,6 +190,17 @@ class Node:
             self.blockchain = temp_chain
             return True
 
+    def _process_message(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
+        """Process received message and return response if needed"""
+        message_type = message.get("type")
+        if message_type in self.message_handlers:
+            try:
+                return self.message_handlers[message_type](message, sender_address)
+            except Exception as e:
+                self.logger.error(f"Error processing {message_type} message: {str(e)}")
+        else:
+            self.logger.warning(f"Unknown message type: {message_type}")
+        return None
     def _handle_block_message(self, message: Dict, sender_address: Tuple[str, int]):
         """Handle received block"""
         block_data = message.get("data")
@@ -165,35 +229,6 @@ class Node:
         if transaction.verify_transaction(self.blockchain):
             self.broadcast_transaction(transaction)
 
-    def _handle_peer_request(self, message: Dict, sender_address: Tuple[str, int]):
-        """Handle peer list request"""
-        with self.peers_lock:
-            response = {
-                "type": "peer_response",
-                "data": list(self.peers)
-            }
-            try:
-                self._send_message(sender_address, response)
-            except ConnectionError:
-                pass
-
-    def _handle_peer_response(self, message: Dict, sender_address: Tuple[str, int]):
-        """Handle peer list response"""
-        peer_list = message.get("data", [])
-        for peer in peer_list:
-            self.connect_to_peer(tuple(peer))
-
-    def _process_message(self, message: Dict, sender_address: Tuple[str, int]):
-        """Process received message"""
-        message_type = message.get("type")
-        if message_type in self.message_handlers:
-            try:
-                self.message_handlers[message_type](message, sender_address)
-            except Exception as e:
-                self.logger.error(f"Error processing {message_type} message: {str(e)}")
-        else:
-            self.logger.warning(f"Unknown message type: {message_type}")
-
     def broadcast_block(self, block: Block):
         """Broadcast block to all peers"""
         message = {
@@ -221,6 +256,7 @@ class Node:
                 except ConnectionError:
                     dead_peers.add(peer)
                     
+            # Remove dead peers
             self.peers -= dead_peers
 
     def _send_message(self, peer: Tuple[str, int], message: Dict):
@@ -234,6 +270,24 @@ class Node:
             raise ConnectionError(f"Failed to send message to {peer}: {str(e)}")
         finally:
             sock.close()
+
+    def _handle_peer_request(self, message: Dict, sender_address: Tuple[str, int]):
+        """Handle peer list request"""
+        with self.peers_lock:
+            response = {
+                "type": "peer_response",
+                "data": list(self.peers)
+            }
+            try:
+                self._send_message(sender_address, response)
+            except ConnectionError:
+                pass
+
+    def _handle_peer_response(self, message: Dict, sender_address: Tuple[str, int]):
+        """Handle peer list response"""
+        peer_list = message.get("data", [])
+        for peer in peer_list:
+            self.connect_to_peer(tuple(peer))
 
     def connect_to_peer(self, peer_address: Tuple[str, int]) -> bool:
         """Connect to new peer"""
@@ -266,24 +320,26 @@ class Node:
                 
             time.sleep(300)  # Run every 5 minutes
 
+    def get_transaction_status(self, tx_id: str) -> str:
+        """Get status of a specific transaction"""
+        if tx_id in self.pending_transactions:
+            return "pending"
+            
+        # Check blockchain
+        with self.chain_lock:
+            for block in self.blockchain.chain:
+                for tx in block.transactions:
+                    if tx.transaction_id == tx_id:
+                        return "confirmed"
+        
+        return "unknown"
+
     def get_node_status(self) -> Dict:
         """Get current node status"""
         return {
             "address": f"{self.host}:{self.port}",
             "peers": len(self.peers),
             "chain_length": len(self.blockchain.chain),
-            "pending_transactions": len(self.pending_transactions)
+            "pending_transactions": len(self.pending_transactions),
+            "running": self.running
         }
-
-    def get_transaction_status(self, tx_id: str) -> Optional[str]:
-        """Get status of a transaction"""
-        if tx_id in self.pending_transactions:
-            return "pending"
-            
-        # Check if transaction is in blockchain
-        for block in self.blockchain.chain:
-            for tx in block.transactions:
-                if tx.transaction_id == tx_id:
-                    return "confirmed"
-                    
-        return None
