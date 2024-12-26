@@ -1,0 +1,515 @@
+{
+  "chain": [
+    {
+      "height": 0,
+      "previous_hash": "0",
+      "transactions": [
+        {
+          "transaction_id": "6c9ea523c9c671203185b96e59f0ea0458fd54b70e97481065caa16aec087332",
+          "version": 1,
+          "sender": "0",
+          "recipient": "1FHjS4iEeYHN1W1QhFUJP66iXY243d7MR9",
+          "amount": "50",
+          "timestamp": 1735172000,
+          "type": "genesis",
+          "data": {
+            "type": "genesis",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": "bitcoin aged fine!",
+            "nonce": 0
+          },
+          "message": "bitcoin aged fine!",
+          "signature": null,
+          "nonce": 0,
+          "fee": "0"
+        },
+        {
+          "transaction_id": "3966cbbec1e5ebff2b386662f8519c3b781a28e4a06a17589d574dc7cd112d03",
+          "version": 1,
+          "sender": "0",
+          "recipient": "1LAYUXbcj2HLsQjx5x3eziTiYWd9d4uR9T",
+          "amount": "150",
+          "timestamp": 1735172000,
+          "type": "genesis",
+          "data": {
+            "type": "genesis",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": "Initial staking allocation",
+            "nonce": 0
+          },
+          "message": "Initial staking allocation",
+          "signature": null,
+          "nonce": 0,
+          "fee": "0"
+        }
+      ],
+      "timestamp": 1735172000,
+      "validator": null,
+      "version": 1,
+      "merkle_root": "29a6c84e7891cdfc2e65356499391a142e2ee217f9c0169fdfe6eeeb99ef3f20",
+      "hash": "04d21415506ec1c8f6f019337c24abde281faffbf43d163d485af6b96b447545",
+      "size": 1190,
+      "difficulty": 1,
+      "nonce": 0
+    },
+    {
+      "height": 0,
+      "previous_hash": "0",
+      "transactions": [
+        {
+          "transaction_id": "80472a81f3e05786e48294d8995dc1a5be76cbc60cb191edf5ac00ffd82763b9",
+          "version": 1,
+          "sender": "0",
+          "recipient": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+          "amount": "10000000.0",
+          "timestamp": 1735172000,
+          "type": "genesis",
+          "data": {
+            "type": "genesis",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": "Genesis Block",
+            "nonce": 0
+          },
+          "message": "Genesis Block",
+          "signature": null,
+          "nonce": 0,
+          "fee": "0"
+        }
+      ],
+      "timestamp": 1735172000,
+      "validator": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+      "version": 1,
+      "merkle_root": "80472a81f3e05786e48294d8995dc1a5be76cbc60cb191edf5ac00ffd82763b9",
+      "hash": "ee1c71633fc9f2e2115de6561e3782db5c7e8a13971093255993397ff61eeb55",
+      "size": 719,
+      "difficulty": 1,
+      "nonce": 0
+    },
+    {
+      "height": 2,
+      "previous_hash": "ee1c71633fc9f2e2115de6561e3782db5c7e8a13971093255993397ff61eeb55",
+      "transactions": [
+        {
+          "transaction_id": "51db1b2a7c4c0a300bf35fb0737849e14235ead594057ea030350d29e8a99289",
+          "version": 1,
+          "sender": "0",
+          "recipient": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+          "amount": "50",
+          "timestamp": 1735172000,
+          "type": "mining_reward",
+          "data": {
+            "type": "mining_reward",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 0
+          },
+          "message": null,
+          "signature": null,
+          "nonce": 0,
+          "fee": "0"
+        },
+        {
+          "transaction_id": "5459dc92ecd02e37c97659ace609993765ee8a5623f5ca3e6a4673c32dda9a51",
+          "version": 1,
+          "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+          "recipient": "1NFLLsgMHByxuajaZq9D6STKafFQ5gZz5Y",
+          "amount": "1000000.0",
+          "timestamp": 1735172001,
+          "type": "transfer",
+          "data": {
+            "type": "transfer",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 0
+          },
+          "message": null,
+          "signature": "FUZmj0cJeqvyJl1k2Gy6DGzHJ6maoON32D67QqWJ4X5bFydGBfQXS99tQY2kYnmEihQQKtU1mVDt3+8I/qOu6mLAYhvKA/If47wDYeRYVnm0gnyGVu6a4wH+hx4FJYXP1k4ytS8X/SW4XBpDasNDF1SFzY1tJjOn+kDZ9OvjEZosci0BmQM1PQ5VUfyL6HU78xeRgke6dfRHbnRgT/n4SI1dmRZiysmvwHd1KLepKkwmSQyGFGtwvYW6lc3Quj943mVpmdPD7Aet9AahIlH2JJ7GNBZEnmzbnf8otZEZ8ZVp0ILsa70xEw0jLGCkhUW/yYxbgVZSyxcuxczi+JbgZA==",
+          "nonce": 0,
+          "fee": "0.000382"
+        },
+        {
+          "transaction_id": "a08bfc16dd67262f3c8abdaed5993dacb3c2f619129351424f5b0086943559a1",
+          "version": 1,
+          "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+          "recipient": "1537JnG1Jo3teZs972Mmh5qAEcKBfCsRjh",
+          "amount": "1000000.0",
+          "timestamp": 1735172001,
+          "type": "transfer",
+          "data": {
+            "type": "transfer",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 1
+          },
+          "message": null,
+          "signature": "wuuqTMLJv406q75YAf15mjggFexw/2zZ/MYRKrRpE9Yps3UDtDt7ljGKlGtoISxFbSnW7fwbQ7dRQNIr15ZQyCN1hfS5UhAGYH6Z/uqv7EOQnlshGc2Ae8NdHv4ONn73eDFe1/duHYfvbvjKYi0DcujN4/b4fySdcxVHU94xsQrSOfIrdc2kFP5G08lNjgT5tQrnCuT9KNOdmzWeAAkffg9kGWz5Z8YCKL0m67IbA3/ECHWjkgQqZL3udse88MPWnOu3AARPq2dCT5PXL8fB588Sab1O9SK9rh5514w4i5nG3BemNwRwQMlcFlbMq+Z2CAqHaVm1tpSXeXLHX5jplw==",
+          "nonce": 1,
+          "fee": "0.000382"
+        },
+        {
+          "transaction_id": "9ab0dd55a8af86e65814d73f3ecd07e223189e9f058f08e9aa5aab445e89f108",
+          "version": 1,
+          "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+          "recipient": "13fbRLP5bMvpPjJQtrBndy7AxVKPj7EgHR",
+          "amount": "1000000.0",
+          "timestamp": 1735172001,
+          "type": "transfer",
+          "data": {
+            "type": "transfer",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 2
+          },
+          "message": null,
+          "signature": "wQm9TBkUO+aRBUYPsF61ioSIW7R0kQL7sA1BcYDKV1WT9YP4GSJYuTVJ+7qZXs0s2nirrlmXJcYgELVxFjiNGD/uEX9R7T2vRC0DSct8mHGxVIk9h6h/N9igIXomxrgjjwPB87JN4/KHqEMjrXgJszV8AoQEY13VOmga3aeUZOCQ/b+8scU7DQAhCzRAOMsMgRe1ruv5LGoRn6Z2O+Ex+Sq6or8cTvkONZ8aDQvumsCDy0tmIf3T3R58H4TL6j0pHWvLB1gmaZ/1t3mtxZa5Ij4RxbAeLXZu/WjhV7PujQpLDEdSD2K/zT+0qvct6dMjIzeXlKiKPFU+4y19+t5LTw==",
+          "nonce": 2,
+          "fee": "0.000382"
+        },
+        {
+          "transaction_id": "300c183fa015eed1db882e83257a81960c1bf7ea0ef346ace980f366110d8b31",
+          "version": 1,
+          "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+          "recipient": "17iJmaJpKMXbCJdMABNsQYXKxPK6jUMFMc",
+          "amount": "1000000.0",
+          "timestamp": 1735172001,
+          "type": "transfer",
+          "data": {
+            "type": "transfer",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 3
+          },
+          "message": null,
+          "signature": "c5L+NeXi70eR9hMKJIJZe/RIORvLa+TjFtCNOkm8ByFmFB3EfBwwMt3T7xV8BKzfIGA5SrwSxuSuTGF7NgAr89aF80wMxBnF6C8kZfhHWAHN19l1+ehyTPF93VyQorgL1cKd/ZMcComNbQvr5HH81j8o1nzsG9y6sTc7d/LBBoVyYZ2VlZ+50ggkbIH6GkxPtGj4SYTjeyPNP87YUD4pwjUGmLMvfanQvHnsOqj2rrT+xfUrtlfOfcYGkgRwKGqi4ZG3CrOTXMP6SYUuD3AdAwQdMXalQlzYip+Ad8j9WYmU0Vmnc3MwryYNoXccxFXv2JdpiRlXEPn+sRj++S43sQ==",
+          "nonce": 3,
+          "fee": "0.000382"
+        },
+        {
+          "transaction_id": "eac2c348d93183eb128dbb04c1dcdcb5d0c147310c9bb3a4fa76b21c6af0a39e",
+          "version": 1,
+          "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+          "recipient": "1LKSfqh8h5eAWjGtZP9Q5AsMHDSSPnwrKm",
+          "amount": "1000000.0",
+          "timestamp": 1735172001,
+          "type": "transfer",
+          "data": {
+            "type": "transfer",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 4
+          },
+          "message": null,
+          "signature": "FE+fA1TwIgmAmrkUQnc6sDpEDe3C271HaBnHxrVj9/mBoevJL2M/K8ihdUSRaCAWIqGX1z460ltfeZYI9+UFEi8VTzygXQc7QTnbndtAYf4FNz4JPnZLKyNOiKW6Rgq/A/mee4WT+FOU8ExhzllkGAKeFwPcTlwmyMvi2xT8iYc/qjFwz763IpRIT5P5AT2vwfq3HOy1JlkwMSTVvQbdFKW0Hs1u6/8kez8sKA39ZQS/192rlBRRKlOHYIzfcIRZBuZYL88ogjGsXLsw56v4v1JZ+3Dh9b50xD/nSVP+nAfsWlKMy6496fTwltBzrRDKPk+GSLzPuEvjum9pKiWkqA==",
+          "nonce": 4,
+          "fee": "0.000382"
+        }
+      ],
+      "timestamp": 1735172001,
+      "validator": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+      "version": 1,
+      "merkle_root": "9e0ecadc49f0e8162b8abe30054cd13954c5ced837f0f4f4316baa85ceee0e35",
+      "hash": "0937637e78c06a91f290061c5d219dedf9bfac68ed543f1da03476bf439ff6de",
+      "size": 4979,
+      "difficulty": 1,
+      "nonce": 0
+    },
+    {
+      "height": 3,
+      "previous_hash": "0937637e78c06a91f290061c5d219dedf9bfac68ed543f1da03476bf439ff6de",
+      "transactions": [
+        {
+          "transaction_id": "b3a077a2852f3988c1cf6480ace90d0d710a530d4ec3c40c1dabfc4c4ec24931",
+          "version": 1,
+          "sender": "0",
+          "recipient": "1DeZywKdXexkfxfD1vHgS74EciUWnJZAqk",
+          "amount": "50",
+          "timestamp": 1735172031,
+          "type": "mining_reward",
+          "data": {
+            "type": "mining_reward",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 0
+          },
+          "message": null,
+          "signature": null,
+          "nonce": 0,
+          "fee": "0"
+        },
+        {
+          "transaction_id": "64914a93d28028633781423433dc56f4f2458d960ecc3e77a67421a1c3d95a78",
+          "version": 1,
+          "sender": "1NFLLsgMHByxuajaZq9D6STKafFQ5gZz5Y",
+          "recipient": "1537JnG1Jo3teZs972Mmh5qAEcKBfCsRjh",
+          "amount": "10.0",
+          "timestamp": 1735172030,
+          "type": "transfer",
+          "data": {
+            "type": "transfer",
+            "validator_address": null,
+            "delegation_amount": null,
+            "reward_share": null,
+            "unbonding_time": null,
+            "genesis_message": null,
+            "nonce": 0
+          },
+          "message": null,
+          "signature": "ALlG/0RQZzNUHsunHiAGu+61RTVeDuaIg50b8LEGnBoALfkB7EKCQUNUpk4WmEJV91pV3VYeqhOfbMnHQM5B4Rc5CJVXWx+DaWK+bBiZMz2ktX9mk2A31bN2HG1gNZbzBYkOmYc0zBdw8XvI37km34guNowgtHo6YKX01SkRnIgFvMOFGWFv0AaGWE9j/ddAp70b45eP6SmSiN0So8N6RmJz+aX6fYbenhJQtSU5UeWKgE5N9Mzl3nfoTSohC/iPsM1VQI3IKIv0DgVfY6VQmsx0yC+WnR+IsTHu6AkqMxXL2iRIwJF4CfuB/ASAynnPDY5NVbga6RI7ASf1ciBe1A==",
+          "nonce": 0,
+          "fee": "0.000377"
+        }
+      ],
+      "timestamp": 1735172031,
+      "validator": "1DeZywKdXexkfxfD1vHgS74EciUWnJZAqk",
+      "version": 1,
+      "merkle_root": "87e5be88e8845cea1c61e556482f505cd5cca8175d9fc31b36803dff385af025",
+      "hash": "ca56c15362540955243b2069cf94a90e9b2555072f9ec3f85971f62c9631efd4",
+      "size": 1602,
+      "difficulty": 1,
+      "nonce": 0
+    }
+  ],
+  "utxo_set": {
+    "1FHjS4iEeYHN1W1QhFUJP66iXY243d7MR9": [
+      {
+        "transaction_id": "6c9ea523c9c671203185b96e59f0ea0458fd54b70e97481065caa16aec087332",
+        "version": 1,
+        "sender": "0",
+        "recipient": "1FHjS4iEeYHN1W1QhFUJP66iXY243d7MR9",
+        "amount": "50",
+        "timestamp": 1735172000,
+        "type": "genesis",
+        "data": {
+          "type": "genesis",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": "bitcoin aged fine!",
+          "nonce": 0
+        },
+        "message": "bitcoin aged fine!",
+        "signature": null,
+        "nonce": 0,
+        "fee": "0"
+      }
+    ],
+    "1LAYUXbcj2HLsQjx5x3eziTiYWd9d4uR9T": [
+      {
+        "transaction_id": "3966cbbec1e5ebff2b386662f8519c3b781a28e4a06a17589d574dc7cd112d03",
+        "version": 1,
+        "sender": "0",
+        "recipient": "1LAYUXbcj2HLsQjx5x3eziTiYWd9d4uR9T",
+        "amount": "150",
+        "timestamp": 1735172000,
+        "type": "genesis",
+        "data": {
+          "type": "genesis",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": "Initial staking allocation",
+          "nonce": 0
+        },
+        "message": "Initial staking allocation",
+        "signature": null,
+        "nonce": 0,
+        "fee": "0"
+      }
+    ],
+    "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau": [],
+    "1NFLLsgMHByxuajaZq9D6STKafFQ5gZz5Y": [],
+    "1537JnG1Jo3teZs972Mmh5qAEcKBfCsRjh": [
+      {
+        "transaction_id": "a08bfc16dd67262f3c8abdaed5993dacb3c2f619129351424f5b0086943559a1",
+        "version": 1,
+        "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+        "recipient": "1537JnG1Jo3teZs972Mmh5qAEcKBfCsRjh",
+        "amount": "1000000.0",
+        "timestamp": 1735172001,
+        "type": "transfer",
+        "data": {
+          "type": "transfer",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": null,
+          "nonce": 1
+        },
+        "message": null,
+        "signature": "wuuqTMLJv406q75YAf15mjggFexw/2zZ/MYRKrRpE9Yps3UDtDt7ljGKlGtoISxFbSnW7fwbQ7dRQNIr15ZQyCN1hfS5UhAGYH6Z/uqv7EOQnlshGc2Ae8NdHv4ONn73eDFe1/duHYfvbvjKYi0DcujN4/b4fySdcxVHU94xsQrSOfIrdc2kFP5G08lNjgT5tQrnCuT9KNOdmzWeAAkffg9kGWz5Z8YCKL0m67IbA3/ECHWjkgQqZL3udse88MPWnOu3AARPq2dCT5PXL8fB588Sab1O9SK9rh5514w4i5nG3BemNwRwQMlcFlbMq+Z2CAqHaVm1tpSXeXLHX5jplw==",
+        "nonce": 1,
+        "fee": "0.000382"
+      },
+      {
+        "transaction_id": "64914a93d28028633781423433dc56f4f2458d960ecc3e77a67421a1c3d95a78",
+        "version": 1,
+        "sender": "1NFLLsgMHByxuajaZq9D6STKafFQ5gZz5Y",
+        "recipient": "1537JnG1Jo3teZs972Mmh5qAEcKBfCsRjh",
+        "amount": "10.0",
+        "timestamp": 1735172030,
+        "type": "transfer",
+        "data": {
+          "type": "transfer",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": null,
+          "nonce": 0
+        },
+        "message": null,
+        "signature": "ALlG/0RQZzNUHsunHiAGu+61RTVeDuaIg50b8LEGnBoALfkB7EKCQUNUpk4WmEJV91pV3VYeqhOfbMnHQM5B4Rc5CJVXWx+DaWK+bBiZMz2ktX9mk2A31bN2HG1gNZbzBYkOmYc0zBdw8XvI37km34guNowgtHo6YKX01SkRnIgFvMOFGWFv0AaGWE9j/ddAp70b45eP6SmSiN0So8N6RmJz+aX6fYbenhJQtSU5UeWKgE5N9Mzl3nfoTSohC/iPsM1VQI3IKIv0DgVfY6VQmsx0yC+WnR+IsTHu6AkqMxXL2iRIwJF4CfuB/ASAynnPDY5NVbga6RI7ASf1ciBe1A==",
+        "nonce": 0,
+        "fee": "0.000377"
+      }
+    ],
+    "13fbRLP5bMvpPjJQtrBndy7AxVKPj7EgHR": [
+      {
+        "transaction_id": "9ab0dd55a8af86e65814d73f3ecd07e223189e9f058f08e9aa5aab445e89f108",
+        "version": 1,
+        "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+        "recipient": "13fbRLP5bMvpPjJQtrBndy7AxVKPj7EgHR",
+        "amount": "1000000.0",
+        "timestamp": 1735172001,
+        "type": "transfer",
+        "data": {
+          "type": "transfer",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": null,
+          "nonce": 2
+        },
+        "message": null,
+        "signature": "wQm9TBkUO+aRBUYPsF61ioSIW7R0kQL7sA1BcYDKV1WT9YP4GSJYuTVJ+7qZXs0s2nirrlmXJcYgELVxFjiNGD/uEX9R7T2vRC0DSct8mHGxVIk9h6h/N9igIXomxrgjjwPB87JN4/KHqEMjrXgJszV8AoQEY13VOmga3aeUZOCQ/b+8scU7DQAhCzRAOMsMgRe1ruv5LGoRn6Z2O+Ex+Sq6or8cTvkONZ8aDQvumsCDy0tmIf3T3R58H4TL6j0pHWvLB1gmaZ/1t3mtxZa5Ij4RxbAeLXZu/WjhV7PujQpLDEdSD2K/zT+0qvct6dMjIzeXlKiKPFU+4y19+t5LTw==",
+        "nonce": 2,
+        "fee": "0.000382"
+      }
+    ],
+    "17iJmaJpKMXbCJdMABNsQYXKxPK6jUMFMc": [
+      {
+        "transaction_id": "300c183fa015eed1db882e83257a81960c1bf7ea0ef346ace980f366110d8b31",
+        "version": 1,
+        "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+        "recipient": "17iJmaJpKMXbCJdMABNsQYXKxPK6jUMFMc",
+        "amount": "1000000.0",
+        "timestamp": 1735172001,
+        "type": "transfer",
+        "data": {
+          "type": "transfer",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": null,
+          "nonce": 3
+        },
+        "message": null,
+        "signature": "c5L+NeXi70eR9hMKJIJZe/RIORvLa+TjFtCNOkm8ByFmFB3EfBwwMt3T7xV8BKzfIGA5SrwSxuSuTGF7NgAr89aF80wMxBnF6C8kZfhHWAHN19l1+ehyTPF93VyQorgL1cKd/ZMcComNbQvr5HH81j8o1nzsG9y6sTc7d/LBBoVyYZ2VlZ+50ggkbIH6GkxPtGj4SYTjeyPNP87YUD4pwjUGmLMvfanQvHnsOqj2rrT+xfUrtlfOfcYGkgRwKGqi4ZG3CrOTXMP6SYUuD3AdAwQdMXalQlzYip+Ad8j9WYmU0Vmnc3MwryYNoXccxFXv2JdpiRlXEPn+sRj++S43sQ==",
+        "nonce": 3,
+        "fee": "0.000382"
+      }
+    ],
+    "1LKSfqh8h5eAWjGtZP9Q5AsMHDSSPnwrKm": [
+      {
+        "transaction_id": "eac2c348d93183eb128dbb04c1dcdcb5d0c147310c9bb3a4fa76b21c6af0a39e",
+        "version": 1,
+        "sender": "1PhdJNZN4awMFyn8hbzL3f8qTtmCCMHvau",
+        "recipient": "1LKSfqh8h5eAWjGtZP9Q5AsMHDSSPnwrKm",
+        "amount": "1000000.0",
+        "timestamp": 1735172001,
+        "type": "transfer",
+        "data": {
+          "type": "transfer",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": null,
+          "nonce": 4
+        },
+        "message": null,
+        "signature": "FE+fA1TwIgmAmrkUQnc6sDpEDe3C271HaBnHxrVj9/mBoevJL2M/K8ihdUSRaCAWIqGX1z460ltfeZYI9+UFEi8VTzygXQc7QTnbndtAYf4FNz4JPnZLKyNOiKW6Rgq/A/mee4WT+FOU8ExhzllkGAKeFwPcTlwmyMvi2xT8iYc/qjFwz763IpRIT5P5AT2vwfq3HOy1JlkwMSTVvQbdFKW0Hs1u6/8kez8sKA39ZQS/192rlBRRKlOHYIzfcIRZBuZYL88ogjGsXLsw56v4v1JZ+3Dh9b50xD/nSVP+nAfsWlKMy6496fTwltBzrRDKPk+GSLzPuEvjum9pKiWkqA==",
+        "nonce": 4,
+        "fee": "0.000382"
+      }
+    ],
+    "1DeZywKdXexkfxfD1vHgS74EciUWnJZAqk": [
+      {
+        "transaction_id": "b3a077a2852f3988c1cf6480ace90d0d710a530d4ec3c40c1dabfc4c4ec24931",
+        "version": 1,
+        "sender": "0",
+        "recipient": "1DeZywKdXexkfxfD1vHgS74EciUWnJZAqk",
+        "amount": "50",
+        "timestamp": 1735172031,
+        "type": "mining_reward",
+        "data": {
+          "type": "mining_reward",
+          "validator_address": null,
+          "delegation_amount": null,
+          "reward_share": null,
+          "unbonding_time": null,
+          "genesis_message": null,
+          "nonce": 0
+        },
+        "message": null,
+        "signature": null,
+        "nonce": 0,
+        "fee": "0"
+      }
+    ]
+  },
+  "genesis_wallets": {
+    "unspendable": "1FHjS4iEeYHN1W1QhFUJP66iXY243d7MR9",
+    "staking": "1LAYUXbcj2HLsQjx5x3eziTiYWd9d4uR9T"
+  },
+  "mempool": [],
+  "current_block_reward": "50",
+  "validator_stakes": {},
+  "total_staked": "0",
+  "config": {
+    "initial_reward": "50",
+    "halving_interval": 210000,
+    "total_supply": "21000000"
+  },
+  "metadata": {
+    "timestamp": 1735179951,
+    "version": "1.0.0",
+    "total_transactions": 11,
+    "chain_height": 3
+  }
+}

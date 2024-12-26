@@ -1,545 +1,893 @@
 # src/network/node.py
-import socket
+
+import asyncio
 import json
-import copy
-import threading
+import logging
+from typing import Optional, Dict, List, Tuple, Set, Any
+from dataclasses import dataclass
 import time
-from typing import List, Dict, Optional, Tuple, Set
+from decimal import Decimal
+from pathlib import Path
+import socket
+import struct
+import aiofiles
+from contextlib import asynccontextmanager
+
 from ..blockchain.blockchain import Blockchain
+from ..blockchain.transaction import Transaction
 from ..blockchain.block import Block
-from ..blockchain.transaction import Transaction, TransactionType
-from ..utils.logger import get_logger
+from ..consensus.proof_of_stake import ProofOfStake
+from ..wallet.wallet import Wallet  # For generating node's address
+from decimal import Decimal
+import logging
+logger = logging.getLogger(__name__)
+
+@dataclass
+class PeerInfo:
+    """Information about a connected peer"""
+    node_id: str
+    host: str
+    port: int
+    last_seen: float
+    version: str = "1.0.0"
+    status: str = "active"
+
+@dataclass
+class Message:
+    """Network message structure"""
+    type: str
+    payload: Dict[str, Any]
+    sender: str
+    timestamp: float = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = time.time()
+
+    def serialize(self) -> str:
+        """Convert message to JSON string"""
+        return json.dumps({
+            "type": self.type,
+            "payload": self.payload,
+            "sender": self.sender,
+            "timestamp": self.timestamp
+        })
+
+    @classmethod
+    def deserialize(cls, data: str) -> 'Message':
+        """Create message from JSON string"""
+        msg_dict = json.loads(data)
+        return cls(
+            type=msg_dict["type"],
+            payload=msg_dict["payload"],
+            sender=msg_dict["sender"],
+            timestamp=msg_dict.get("timestamp", time.time())
+        )
 
 class Node:
     def __init__(
         self,
         host: str,
         port: int,
-        blockchain: Optional[Blockchain] = None
+        blockchain: Optional[Blockchain] = None,
+        max_peers: int = 50
     ):
-        """Initialize node"""
+        """Initialize the node"""
         self.host = host
         self.port = port
-        self.blockchain = blockchain or Blockchain()
-        self.peers: Set[Tuple[str, int]] = set()
-        self.pending_transactions: Set[str] = set()
         
-        # Connection management
+        # Load blockchain state if not provided
+        if blockchain is None:
+            blockchain = self._load_blockchain_state()
+        self.blockchain = blockchain
+        
+        self.peers: Dict[str, PeerInfo] = {}
+        self.server = None
         self.running = False
-        self.server_socket = None
-        self.logger = get_logger(__name__)
-        
-        # Synchronization locks
-        self.chain_lock = threading.Lock()
-        self.peers_lock = threading.Lock()
-        
-        # Thread tracking
-        self.connection_handler_thread = None
-        self.peer_discovery_thread = None
-        self.health_check_thread = None
-        
-        # Thread events for graceful shutdown
-        self.shutdown_event = threading.Event()
-        
+        self.node_id = f"node_{port}"
+        self.max_peers = max_peers
+
+        # Initialize consensus
+        self.pos_consensus = self.blockchain.get_pos_consensus() if blockchain else ProofOfStake()
+        self.wallet = Wallet.generate_new()  # Create wallet for node
+        self.address = self.wallet.address  # Set node address
+
+        # Connection tracking
+        self.active_connections: Dict[str, Tuple[asyncio.StreamReader, asyncio.StreamWriter]] = {}
+        self.connecting_peers: Set[str] = set()
+        self.connection_retries: Dict[str, int] = {}
+        self.max_connection_retries = 3
+        self.connection_tasks: Set[asyncio.Task] = set()
+
+        # Message queue
+        self.message_queue: asyncio.Queue = asyncio.Queue()
+
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
+
+        # Background tasks
+        self.background_tasks: List[asyncio.Task] = []
+
         # Message handlers
         self.message_handlers = {
-            "block": self._handle_block_message,
-            "transaction": self._handle_transaction_message,
-            "peer_request": self._handle_peer_request,
-            "peer_response": self._handle_peer_response,
-            "transaction_status": self._handle_transaction_status,
+            "handshake": self._handle_handshake,
+            "handshake_response": self._handle_handshake_response,
+            "transaction": self._handle_transaction,
+            "block": self._handle_block,
+            "peer_list": self._handle_peer_list,
+            "get_blocks": self._handle_get_blocks,
+            "get_balance": self._handle_get_balance,
             "node_status": self._handle_node_status,
-            "sync_request": self._handle_sync_request,
-            "sync_response": self._handle_sync_response,
+            "transaction_status": self._handle_transaction_status
         }
 
-    def start(self, init_only: bool = False):
-        """Start the node's server
-        
-        Args:
-            init_only: If True, just initialize the socket but don't start background threads
-        """
-        try:
-            if self.running:
-                self.logger.warning(f"Node {self.port} is already running")
-                return
+    async def _block_production_loop(self):
+        """Periodic block production"""
+        self.logger = logging.getLogger(__name__)  # Add this line
+        self.logger.debug("Starting block production loop")
 
-            self.running = True
-            self.shutdown_event.clear()
-            self.logger.info(f"Starting node on {self.host}:{self.port}")
-            
-            # Create and configure socket
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            
-            # Bind socket
-            self.logger.info(f"Binding socket to {self.host}:{self.port}")
-            self.server_socket.bind((self.host, self.port))
-            
-            # Start listening
-            self.logger.info(f"Starting to listen on {self.host}:{self.port}")
-            self.server_socket.listen(5)
-            self.server_socket.settimeout(1)  # Add timeout for graceful shutdown
-            self.logger.info(f"Node successfully listening on {self.host}:{self.port}")
-            
-            if not init_only:
-                # Start threads only if not in init_only mode
-                self.connection_handler_thread = threading.Thread(
-                    target=self._handle_connections,
-                    name=f"ConnectionHandler-{self.port}",
-                    daemon=True
-                )
-                self.connection_handler_thread.start()
+    
+        while self.running:
+            self.logger.debug("Block production loop iteration starting")
+            try:
+                if len(self.blockchain.mempool) > 0:
+                    self.logger.debug("Found transactions in mempool, attempting block production")
+
+                    # Get validator for current height
+                    current_height = len(self.blockchain.chain)
+                    self.logger.debug(f"Current chain height: {current_height}")
+
+                    validator = self.pos_consensus.select_validator(current_height)
+                    self.logger.debug(f"Selected validator: {validator}")
+                    self.logger.debug(f"Node address: {self.address}")
+                    self.logger.debug(f"Active validators: {self.pos_consensus.get_active_validators()}")
                 
-                self.health_check_thread = threading.Thread(
-                    target=self._run_health_checks,
-                    name=f"HealthCheck-{self.port}",
-                    daemon=True
-                )
-                self.health_check_thread.start()
+                    if validator == self.address:
+                        self.logger.debug("We are the selected validator, creating block...")
+                        # Create reward transaction
+                        reward_tx = Transaction.create_reward(
+                            recipient=self.address,
+                            amount=self.blockchain.get_block_reward(current_height)
+                        )
+                        self.logger.debug(f"Created reward transaction: {reward_tx.to_dict()}")
+
+                        # Get transactions from mempool (including reward)
+                        transactions = [reward_tx] + self.blockchain.mempool[:10]
+                        self.logger.debug(f"Selected {len(transactions)} transactions for block")
+
+                        # Create and add block
+                        new_block = Block(
+                            height=current_height,
+                            previous_hash=self.blockchain.chain[-1].hash,
+                            transactions=transactions,
+                            timestamp=int(time.time()),
+                            validator=self.address
+                        )
+                    
+                        if self.blockchain.add_block(new_block):
+                            await self.broadcast_block(new_block)
+                            self.logger.info(f"Produced new block at height {current_height}")
+                        else:
+                            self.logger.error("Failed to add new block")
+                    else:
+                        self.logger.debug("Not selected as validator for this round")
+                else:
+                    self.logger.debug("No transactions in mempool")                    
+            
+                # More frequent block production for testing
+                await asyncio.sleep(5)  # 5 second block time for testing
+            
+            except Exception as e:
+                self.logger.error(f"Error in block production: {str(e)}", exc_info=True)
+                await asyncio.sleep(1)    
+
+    def _load_blockchain_state(self) -> Blockchain:
+        """Load blockchain state from file"""
+        try:
+            state_file = Path("testnet_data/blockchain_state.json")
+            if not state_file.exists():
+                self.logger.warning("No blockchain state found, creating new blockchain")
+                return Blockchain()
+                
+            self.logger.debug(f"Loading blockchain state from {state_file}")
+            with open(state_file, "r") as f:
+                state = json.load(f)
+                
+            blockchain = Blockchain()
+            blockchain.import_state(state)
+            
+            self.logger.debug("Blockchain state loaded successfully")
+            return blockchain
             
         except Exception as e:
-            self.logger.error(f"Failed to start node: {str(e)}")
+            self.logger.error(f"Error loading blockchain state: {str(e)}")
+            return Blockchain()
+
+    async def start(self):
+        """Start the node's server and background tasks"""
+        self.logger.debug(f"Starting node on {self.host}:{self.port}")
+        self.logger.debug(f"Node address: {self.address}")
+        self.logger.debug(f"Initial validator status: active={self.pos_consensus.is_active_validator(self.address)}")
+        self.logger.debug(f"Initial active validators: {self.pos_consensus.get_active_validators()}")
+
+        if self.running:
+            return
+
+        try:
+            self.running = True
+        
+            # Create and start server
+            self.server = await asyncio.start_server(
+                self.handle_connection,
+                self.host,
+                self.port
+            )
+        
+            self.logger.info(f"Node listening on {self.host}:{self.port}")
+
+             # Start block production
+            self.background_tasks.append(
+                asyncio.create_task(self._block_production_loop())
+            )    
+        
+            # Start background tasks
+            self.background_tasks = [
+                asyncio.create_task(self._process_message_queue()),
+                asyncio.create_task(self._maintain_peers()),
+                asyncio.create_task(self._periodic_state_save())
+            ]
+        
+            # Keep server running
+            try:
+                async with self.server:
+                    await self.server.serve_forever()
+            except asyncio.CancelledError:
+                self.logger.info("Server shutdown requested")
+                raise
+            except Exception as e:
+                self.logger.error(f"Server error: {str(e)}")
+                raise
+                
+        except Exception as e:
             self.running = False
-            self.shutdown_event.set()
+            self.logger.error(f"Failed to start node: {str(e)}")
             raise
 
-    def stop(self):
-        """Stop the node's server"""
+    async def stop(self):
+        """Stop the node and clean up"""
         try:
-            self.logger.info(f"Stopping node on {self.host}:{self.port}")
             self.running = False
-            self.shutdown_event.set()
             
-            # Close server socket
-            if self.server_socket:
-                try:
-                    self.server_socket.close()
-                    self.logger.info("Server socket closed successfully")
-                except Exception as e:
-                    self.logger.error(f"Error closing server socket: {str(e)}")
+            # Cancel background tasks
+            for task in self.background_tasks:
+                task.cancel()
+                
+            await asyncio.gather(*self.background_tasks, return_exceptions=True)
             
-            # Let threads finish naturally (they're daemon threads)
-            time.sleep(1)  # Give threads time to notice shutdown event
+            # Save final state
+            await self._save_blockchain_state()
             
-            # Clear thread references
-            self.connection_handler_thread = None
-            self.health_check_thread = None
-            
-            # Clear peer connections
-            with self.peers_lock:
-                self.peers.clear()
-            
-            self.logger.info(f"Node {self.port} stopped successfully")
+            # Close all connections
+            for peer_id, (reader, writer) in self.active_connections.items():
+                writer.close()
+                await writer.wait_closed()
+                
+            # Close server
+            if self.server:
+                self.server.close()
+                await self.server.wait_closed()
+                
+            self.logger.info("Node stopped successfully")
             
         except Exception as e:
             self.logger.error(f"Error stopping node: {str(e)}")
-            raise
 
-    def is_healthy(self) -> bool:
-        """Check if node is healthy"""
-        return (
-            self.running and 
-            not self.shutdown_event.is_set() and
-            self.server_socket is not None and
-            (self.connection_handler_thread is None or self.connection_handler_thread.is_alive()) and
-            (self.health_check_thread is None or self.health_check_thread.is_alive())
-        )
-
-    def _handle_connections(self):
+    async def handle_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Handle incoming connections"""
-        self.logger.info(f"Connection handler started for node {self.port}")
-        while not self.shutdown_event.is_set():
-            try:
-                try:
-                    client_socket, address = self.server_socket.accept()
-                    self.logger.debug(f"New connection from {address}")
-                    
-                    client_handler = threading.Thread(
-                        target=self._handle_client,
-                        args=(client_socket, address),
-                        name=f"ClientHandler-{address[1]}",
-                        daemon=True
-                    )
-                    client_handler.start()
-                    
-                except socket.timeout:
-                    # This is expected due to the socket timeout we set
-                    continue
-                    
-            except Exception as e:
-                if self.running and not self.shutdown_event.is_set():
-                    self.logger.error(f"Connection handling error: {str(e)}")
-                    time.sleep(1)
+        peer_addr = writer.get_extra_info('peername')
+        self.logger.debug(f"New connection from {peer_addr}")
+        peer_id = None
 
-    def _handle_client(self, client_socket: socket.socket, address: Tuple[str, int]):
-        """Handle individual client connection"""
         try:
-            client_socket.settimeout(5)
-            data = client_socket.recv(4096)
-            if data:
-                message = json.loads(data.decode())
-                self.logger.debug(f"Received message from {address}: {message.get('type')}")
-                
-                response = self._process_message(message, address)
+            while self.running:
+                # Read message length
+                length_data = await reader.read(4)
+                if not length_data:
+                    break
+
+                message_length = int.from_bytes(length_data, 'big')
+                if message_length > 10_000_000:  # 10MB limit
+                    raise ValueError("Message too large")
+
+                # Read message data
+                message_data = await reader.read(message_length)
+                if not message_data:
+                    break
+
+                # Process message
+                message = Message.deserialize(message_data.decode())
+                peer_id = message.sender
+
+                # Add to active connections if new peer
+                if peer_id and peer_id not in self.active_connections:
+                    self.active_connections[peer_id] = (reader, writer)
+
+                # Handle message
+                response = await self._handle_message(message)
                 if response:
-                    response_data = json.dumps(response).encode()
-                    client_socket.send(response_data)
-                    self.logger.debug(f"Sent response to {address}: {response.get('type')}")
-                
-        except json.JSONDecodeError:
-            self.logger.warning(f"Invalid JSON message from {address}")
-        except socket.timeout:
-            self.logger.debug(f"Connection timeout from {address}")
-        except Exception as e:
-            self.logger.error(f"Client handling error from {address}: {str(e)}")
-        finally:
-            try:
-                client_socket.close()
-                self.logger.debug(f"Closed connection from {address}")
-            except Exception as e:
-                self.logger.error(f"Error closing client socket: {str(e)}")
+                    response_data = response.serialize().encode()
+                    writer.write(len(response_data).to_bytes(4, 'big'))
+                    writer.write(response_data)
+                    await writer.drain()
 
-    def connect_to_peer(self, peer_address: Tuple[str, int]) -> bool:
+        except Exception as e:
+            self.logger.error(f"Error handling connection from {peer_addr}: {str(e)}")
+
+        finally:
+            # Clean up connection
+            if peer_id:
+                if peer_id in self.active_connections:
+                    del self.active_connections[peer_id]
+                if peer_id in self.peers:
+                    del self.peers[peer_id]
+            writer.close()
+            await writer.wait_closed()
+            self.logger.debug(f"Connection closed from {peer_addr}")
+
+    async def _handle_message(self, message: Message) -> Optional[Message]:
+        """Process incoming messages"""
+        try:
+            if message.sender in self.peers:
+                self.peers[message.sender].last_seen = time.time()
+
+            handler = self.message_handlers.get(message.type)
+            if handler:
+                response = await handler(message)
+                return response
+            else:
+                self.logger.warning(f"Unknown message type: {message.type}")
+                return Message(
+                    type="error",
+                    payload={"error": "Unknown message type"},
+                    sender=self.node_id
+                )
+        except Exception as e:
+            self.logger.error(f"Error handling message: {str(e)}")
+            return Message(
+                type="error",
+                payload={"error": str(e)},
+                sender=self.node_id
+            )
+
+    async def connect_to_peer(self, address: Tuple[str, int], handshake_data: Optional[Dict] = None) -> bool:
         """Connect to a new peer"""
-        try:
-            if peer_address == (self.host, self.port):
-                return False  # Don't connect to self
-                
-            with self.peers_lock:
-                if peer_address in self.peers:
-                    return False  # Already connected
-                
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            sock.connect(peer_address)
-            
-            message = {
-                "type": "peer_request",
-                "data": {}
-            }
-            sock.send(json.dumps(message).encode())
-            
-            with self.peers_lock:
-                self.peers.add(peer_address)
-            
-            self.logger.info(f"Connected to peer {peer_address}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error connecting to peer {peer_address}: {str(e)}")
+        if len(self.peers) >= self.max_peers:
             return False
+
+        try:
+            reader, writer = await asyncio.open_connection(address[0], address[1])
+
+            # Create handshake message
+            if handshake_data is None:
+                handshake_data = {
+                    "type": "handshake",
+                    "payload": {
+                        "node_id": self.node_id,
+                        "host": self.host,
+                        "port": self.port,
+                        "version": "1.0.0"
+                    },
+                    "sender": self.node_id
+                }
+
+            # Send handshake
+            message = Message(**handshake_data)
+            message_data = message.serialize().encode()
+            writer.write(len(message_data).to_bytes(4, 'big'))
+            writer.write(message_data)
+            await writer.drain()
+
+            # Read response
+            length_data = await reader.read(4)
+            if not length_data:
+                return False
+
+            message_length = int.from_bytes(length_data, 'big')
+            response_data = await reader.read(message_length)
+
+            if response_data:
+                response = Message.deserialize(response_data.decode())
+                if response.type == "handshake_response" and response.payload.get("status") == "accepted":
+                    peer_id = response.sender
+                    
+                    # Store peer info
+                    self.peers[peer_id] = PeerInfo(
+                        node_id=peer_id,
+                        host=address[0],
+                        port=address[1],
+                        last_seen=time.time()
+                    )
+                    
+                    # Store connection
+                    self.active_connections[peer_id] = (reader, writer)
+
+                    # Create connection handling task
+                    task = asyncio.create_task(self._handle_peer_connection(peer_id, reader, writer))
+                    self.connection_tasks.add(task)
+                    task.add_done_callback(self.connection_tasks.discard)
+
+                    return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to connect to peer {address}: {str(e)}")
+            return False
+
+    async def _handle_peer_connection(self, peer_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        """Handle ongoing peer connection"""
+        try:
+            while self.running:
+                # Read message length
+                length_data = await reader.read(4)
+                if not length_data:
+                    break
+
+                message_length = int.from_bytes(length_data, 'big')
+                if message_length > 10_000_000:  # 10MB limit
+                    break
+
+                # Read message
+                message_data = await reader.read(message_length)
+                if not message_data:
+                    break
+
+                # Process message
+                message = Message.deserialize(message_data.decode())
+                await self._handle_message(message)
+
+                # Update last seen
+                if peer_id in self.peers:
+                    self.peers[peer_id].last_seen = time.time()
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.logger.error(f"Error handling peer connection {peer_id}: {str(e)}")
         finally:
-            sock.close()
+            # Clean up connection
+            if peer_id in self.active_connections:
+                del self.active_connections[peer_id]
+            if peer_id in self.peers:
+                del self.peers[peer_id]
+            writer.close()
+            await writer.wait_closed()
 
-    def _process_message(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
-        """Process received message and return response if needed"""
-        try:
-            message_type = message.get("type")
-            if message_type in self.message_handlers:
-                try:
-                    response = self.message_handlers[message_type](message, sender_address)
-                    if response:
-                        response.setdefault("type", f"{message_type}_response")
-                    return response
-                except Exception as e:
-                    self.logger.error(f"Error processing {message_type} message: {str(e)}")
-                    return {
-                        "type": "error",
-                        "data": {"error": f"Error processing {message_type}: {str(e)}"}
-                    }
-            else:
-                self.logger.warning(f"Unknown message type: {message_type}")
-                return {
-                    "type": "error",
-                    "data": {"error": f"Unknown message type: {message_type}"}
-                }
-        except Exception as e:
-            self.logger.error(f"Error in message processing: {str(e)}")
-            return {
-                "type": "error",
-                "data": {"error": str(e)}
-            }
+    # Background Tasks
+    async def _process_message_queue(self):
+        """Process messages from queue"""
+        while self.running:
+            try:
+                message = await self.message_queue.get()
+                await self._handle_message(message)
+                self.message_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error processing message from queue: {str(e)}")
+                await asyncio.sleep(1)
 
-    def _handle_block_message(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
-        """Handle incoming block message"""
+    async def _maintain_peers(self):
+        """Maintain peer connections"""
+        while self.running:
+            try:
+                current_time = time.time()
+                inactive_peers = [
+                    peer_id for peer_id, peer in self.peers.items()
+                    if current_time - peer.last_seen > 300  # 5 minutes timeout
+                ]
+
+                for peer_id in inactive_peers:
+                    if peer_id in self.active_connections:
+                        reader, writer = self.active_connections[peer_id]
+                        writer.close()
+                        await writer.wait_closed()
+                        del self.active_connections[peer_id]
+                    del self.peers[peer_id]
+
+                await asyncio.sleep(60)  # Check every minute
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in peer maintenance: {str(e)}")
+                await asyncio.sleep(60)
+
+    async def _periodic_state_save(self):
+        """Periodically save blockchain state"""
+        while self.running:
+            try:
+                await self._save_blockchain_state()
+                await asyncio.sleep(300)  # Save every 5 minutes
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error saving blockchain state: {str(e)}")
+                await asyncio.sleep(60)
+
+    async def _save_blockchain_state(self):
+        """Save blockchain state to file"""
         try:
-            block_data = message.get("data")
-            if not block_data:
-                return {"type": "error", "data": {"error": "No block data provided"}}
+            if not hasattr(self, 'blockchain') or not self.blockchain:
+                return
+
+            state = self.blockchain.export_state()
             
-            # Convert dictionary to Block object
-            block = Block(**block_data)
+            # Create directory if it doesn't exist
+            Path("testnet_data").mkdir(exist_ok=True)
             
-            # Validate and add block to blockchain
-            if self.blockchain and self.blockchain.add_block(block):
-                self.logger.info(f"Added new block at height {block.height}")
-                return {
-                    "type": "block_response",
-                    "data": {"status": "accepted", "height": block.height}
-                }
-            else:
-                return {
-                    "type": "block_response",
-                    "data": {"status": "rejected", "reason": "Invalid block"}
-                }
+            state_file = Path("testnet_data/blockchain_state.json")
+            async with aiofiles.open(state_file, "w") as f:
+                await f.write(json.dumps(state, indent=2))
                 
-        except Exception as e:
-            self.logger.error(f"Error handling block message: {str(e)}")
-            return {
-                "type": "error",
-                "data": {"error": f"Block processing failed: {str(e)}"}
-            }
-
-    def _handle_transaction_message(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
-        """Handle incoming transaction message"""
-        try:
-            tx_data = message.get("data")
-            if not tx_data:
-                return {"type": "error", "data": {"error": "No transaction data provided"}}
+            self.logger.debug("Blockchain state saved successfully")
             
-            # Convert dictionary to Transaction object
+        except Exception as e:
+            self.logger.error(f"Error saving blockchain state: {str(e)}")
+
+    # Message Handlers
+    async def _handle_handshake(self, message: Message) -> Message:
+        """Handle peer handshake"""
+        try:
+            peer_info = PeerInfo(
+                node_id=message.sender,
+                host=message.payload.get("host", "127.0.0.1"),
+                port=message.payload.get("port", 0),
+                last_seen=time.time(),
+                version=message.payload.get("version", "1.0.0")
+            )
+        
+            self.peers[message.sender] = peer_info
+        
+            return Message(
+                type="handshake_response",
+                payload={
+                    "status": "accepted",
+                    "node_id": self.node_id,
+                    "host": self.host,
+                    "port": self.port,
+                    "version": "1.0.0"
+                },
+                sender=self.node_id
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling handshake: {str(e)}")
+            return Message(
+                type="handshake_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
+
+    async def _handle_handshake_response(self, message: Message) -> Optional[Message]:
+        """Handle handshake response"""
+        try:
+            if message.payload.get("status") == "accepted":
+                peer_info = PeerInfo(
+                    node_id=message.sender,
+                    host=message.payload.get("host", "127.0.0.1"),
+                    port=message.payload.get("port", 0),
+                    last_seen=time.time(),
+                    version=message.payload.get("version", "1.0.0")
+                )
+                self.peers[message.sender] = peer_info
+            return None
+        except Exception as e:
+            self.logger.error(f"Error handling handshake response: {str(e)}")
+            return None
+
+    async def _handle_transaction(self, message: Message) -> Message:
+        """Handle incoming transaction"""
+        try:
+            tx_data = message.payload.get("transaction", {})
+            self.logger.debug(f"Received transaction data: {tx_data}")
+            
             transaction = Transaction.from_dict(tx_data)
-            
-            # Add to blockchain's mempool
-            if self.blockchain and self.blockchain.add_transaction_to_mempool(transaction):
-                self.logger.info(f"Added transaction {transaction.transaction_id} to mempool")
-                return {
-                    "type": "transaction_response",
-                    "data": {"status": "accepted", "tx_id": transaction.transaction_id}
-                }
+            self.logger.debug(f"Transaction parsed: {transaction.transaction_id}")
+
+            # Verify and process transaction
+            self.logger.debug(f"Verifying transaction from {transaction.sender} to {transaction.recipient}")
+            if transaction.verify_transaction(self.blockchain):
+                self.logger.debug("Transaction verification succeeded")
+                if self.blockchain:
+                    self.blockchain.add_transaction_to_mempool(transaction)
+                    self.logger.debug("Transaction added to mempool")
+
+                # Broadcast to peers if needed
+                if message.payload.get("propagate", True):
+                    await self._propagate_message(message, exclude=message.sender)
+                    self.logger.debug("Transaction propagated to peers")
+
+                return Message(
+                    type="transaction_response",
+                    payload={
+                        "status": "accepted",
+                        "tx_id": transaction.transaction_id
+                    },
+                    sender=self.node_id
+                )
             else:
-                return {
-                    "type": "transaction_response",
-                    "data": {"status": "rejected", "reason": "Invalid transaction"}
-                }
+                self.logger.warning(f"Transaction verification failed for sender {transaction.sender}")
+                return Message(
+                    type="transaction_response",
+                    payload={
+                        "status": "rejected",
+                        "reason": "Invalid transaction"
+                    },
+                    sender=self.node_id
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error handling transaction: {str(e)}", exc_info=True)
+            return Message(
+                type="transaction_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
+
+    async def _handle_block(self, message: Message) -> Message:
+        """Handle incoming block"""
+        try:
+            block_data = message.payload.get("block", {})
+            block = Block.from_dict(block_data)
+        
+            if self.blockchain.add_block(block):
+                # Save state after successful block addition
+                await self._save_blockchain_state()
+
+                # Broadcast to peers if needed
+                if message.payload.get("propagate", True):
+                    await self._propagate_message(message, exclude=message.sender)
+                
+                return Message(
+                    type="block_response",
+                    payload={
+                        "status": "accepted",
+                        "block_hash": block.hash
+                    },
+                    sender=self.node_id
+                )
+            else:
+                return Message(
+                    type="block_response",
+                    payload={
+                        "status": "rejected",
+                        "reason": "Invalid block"
+                    },
+                    sender=self.node_id
+                )
                 
         except Exception as e:
-            self.logger.error(f"Error handling transaction message: {str(e)}")
-            return {
-                "type": "error",
-                "data": {"error": f"Transaction processing failed: {str(e)}"}
-            }
+            self.logger.error(f"Error handling block: {str(e)}")
+            return Message(
+                type="block_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
 
-    def _handle_peer_request(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
-        """Handle peer list request"""
+    async def _handle_get_blocks(self, message: Message) -> Message:
+        """Handle block request"""
         try:
-            with self.peers_lock:
-                peer_list = list(self.peers)
-            return {
-                "type": "peer_response",
-                "data": {"peers": peer_list}
-            }
+            start_height = message.payload.get("start_height", 0)
+            end_height = message.payload.get("end_height", len(self.blockchain.chain) - 1)
+        
+            blocks = []
+            for height in range(start_height, min(end_height + 1, len(self.blockchain.chain))):
+                block = self.blockchain.chain[height]
+                blocks.append(block.to_dict())
+        
+            return Message(
+                type="blocks_response",
+                payload={"blocks": blocks},
+                sender=self.node_id
+            )
         except Exception as e:
-            self.logger.error(f"Error handling peer request: {str(e)}")
-            return {
-                "type": "error",
-                "data": {"error": f"Peer list request failed: {str(e)}"}
-            }
+            return Message(
+                type="blocks_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
 
-    def _handle_peer_response(self, message: Dict, sender_address: Tuple[str, int]) -> None:
-        """Handle peer list response"""
+    async def _handle_get_balance(self, message: Message) -> Message:
+        """Handle balance request"""
         try:
-            peers = message.get("data", {}).get("peers", [])
-            for peer in peers:
-                with self.peers_lock:
-                    if peer not in self.peers:
-                        self.peers.add(tuple(peer))
+            address = message.payload["address"]
+            balance = self.blockchain.get_balance(address)
+        
+            return Message(
+                type="balance_response",
+                payload={
+                    "status": "success",
+                    "balance": str(balance),
+                    "address": address
+                },
+                sender=self.node_id
+            )
         except Exception as e:
-            self.logger.error(f"Error handling peer response: {str(e)}")
+            return Message(
+                type="balance_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
 
-    def _handle_transaction_status(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
+    async def _handle_transaction_status(self, message: Message) -> Message:
         """Handle transaction status request"""
         try:
-            tx_id = message.get("data", {}).get("tx_id")
-            if not tx_id:
-                return {"type": "error", "data": {"error": "No transaction ID provided"}}
+            tx_id = message.payload["tx_id"]
+            status = await self.get_transaction_status(tx_id)
+        
+            return Message(
+                type="transaction_status_response",
+                payload=status,
+                sender=self.node_id
+            )
             
-            if tx_id in self.pending_transactions:
-                return {
-                    "type": "transaction_status_response",
-                    "data": {"status": "pending", "tx_id": tx_id}
-                }
-            
-            if self.blockchain and self.blockchain.get_transaction(tx_id):
-                return {
-                    "type": "transaction_status_response",
-                    "data": {"status": "confirmed", "tx_id": tx_id}
-                }
-            
-            return {
-                "type": "transaction_status_response",
-                "data": {"status": "unknown", "tx_id": tx_id}
-            }
-                
         except Exception as e:
             self.logger.error(f"Error handling transaction status request: {str(e)}")
-            return {
-                "type": "error",
-                "data": {"error": f"Transaction status request failed: {str(e)}"}
-            }
+            return Message(
+                type="transaction_status_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
 
-    def _handle_sync_request(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
-        """Handle blockchain sync request"""
+    async def _handle_peer_list(self, message: Message) -> Message:
+        """Handle peer list request"""
         try:
-            start_height = message.get("data", {}).get("start_height")
-            end_height = message.get("data", {}).get("end_height")
-            
-            if start_height is None or end_height is None:
-                return {
-                    "type": "error",
-                    "data": {"error": "Invalid sync request parameters"}
+            peer_list = [
+                {
+                    "node_id": peer_id,
+                    "host": peer.host,
+                    "port": peer.port,
+                    "version": peer.version
                 }
-
-            blocks = []
-            with self.chain_lock:
-                for height in range(start_height, end_height + 1):
-                    block = self.blockchain.get_block_by_height(height)
-                    if block:
-                        blocks.append(block.to_dict())
-
-            return {
-                "type": "sync_response",
-                "data": {
-                    "blocks": blocks,
-                    "start_height": start_height,
-                    "end_height": end_height
-                }
-            }
-
+                for peer_id, peer in self.peers.items()
+            ]
+        
+            return Message(
+                type="peer_list_response",
+                payload={"peers": peer_list},
+                sender=self.node_id
+            )
         except Exception as e:
-            self.logger.error(f"Error handling sync request: {str(e)}")
-            return {
-                "type": "error",
-                "data": {"error": f"Sync request failed: {str(e)}"}
-            }
+            return Message(
+                type="peer_list_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
 
-    def _handle_sync_response(self, message: Dict, sender_address: Tuple[str, int]) -> None:
-        """Handle blockchain sync response"""
-        try:
-            data = message.get("data", {})
-            blocks = data.get("blocks", [])
-            
-            with self.chain_lock:
-                for block_data in blocks:
-                    block = Block(**block_data)
-                    if not self.blockchain.has_block(block.hash):
-                        if self.blockchain.add_block(block):
-                            self.logger.info(f"Added synced block at height {block.height}")
-                        else:
-                            self.logger.warning(f"Failed to add synced block at height {block.height}")
-                            break
-
-        except Exception as e:
-            self.logger.error(f"Error handling sync response: {str(e)}")
-
-    def _handle_node_status(self, message: Dict, sender_address: Tuple[str, int]) -> Optional[Dict]:
+    async def _handle_node_status(self, message: Message) -> Message:
         """Handle node status request"""
         try:
             status = {
-                "address": f"{self.host}:{self.port}",
-                "running": self.running,
-                "peer_count": len(self.peers),
-                "pending_transactions": len(self.pending_transactions),
-                "blockchain_height": len(self.blockchain.chain) if self.blockchain else 0
+                "blockchain_height": len(self.blockchain.chain),
+                "peers": len(self.peers),
+                "node_id": self.node_id,
+                "uptime": time.time() - getattr(self, 'start_time', time.time())
             }
-            return {
-                "type": "node_status_response",
-                "data": status
-            }
+        
+            return Message(
+                type="status_response",
+                payload=status,
+                sender=self.node_id
+            )
         except Exception as e:
-            self.logger.error(f"Error handling node status request: {str(e)}")
-            return {
-                "type": "error",
-                "data": {"error": f"Node status request failed: {str(e)}"}
-            }
+            return Message(
+                type="status_response",
+                payload={
+                    "status": "error",
+                    "reason": str(e)
+                },
+                sender=self.node_id
+            )
 
-    def _run_health_checks(self):
-        """Run periodic health checks"""
-        self.logger.info(f"Starting health check thread for node {self.port}")
-        last_status_log = 0
-        
-        while not self.shutdown_event.is_set():
-            try:
-                current_time = time.time()
-                
-                # Basic health checks
-                if not self.server_socket:
-                    self.logger.error("Server socket is not initialized")
-                    break
-                    
-                if (self.connection_handler_thread is not None and 
-                    not self.connection_handler_thread.is_alive()):
-                    self.logger.error("Connection handler thread died")
-                    break
+    # Utility Methods
+    async def _propagate_message(self, message: Message, exclude: Optional[str] = None) -> None:
+        """Propagate message to all peers except excluded one"""
+        for peer_id, (_, writer) in self.active_connections.items():
+            if peer_id != exclude:
+                try:
+                    message_data = message.serialize().encode()
+                    writer.write(len(message_data).to_bytes(4, 'big'))
+                    writer.write(message_data)
+                    await writer.drain()
+                except Exception as e:
+                    self.logger.error(f"Error propagating message to peer {peer_id}: {str(e)}")
 
-                # Check peer connections
-                with self.peers_lock:
-                    if len(self.peers) == 0:
-                        self.logger.warning("No peer connections")
-                    
-                # Log status periodically
-                if current_time - last_status_log > 60:
-                    status = self.get_node_status()
-                    self.logger.info(f"Node health check - Status: {status}")
-                    last_status_log = current_time
-                    
-                time.sleep(10)  # Sleep between checks
-                
-            except Exception as e:
-                self.logger.error(f"Health check failed: {str(e)}")
-                break
-
-    def get_node_status(self) -> Dict:
-        """Get current node status"""
-        return {
-            "address": f"{self.host}:{self.port}",
-            "running": self.running,
-            "peer_count": len(self.peers),
-            "pending_transactions": len(self.pending_transactions),
-            "blockchain_height": len(self.blockchain.chain) if self.blockchain else 0
-        }
-
-    def broadcast_transaction(self, transaction: Transaction) -> bool:
+    # Public Interface
+    def broadcast_transaction(self, transaction: Transaction):
         """Broadcast transaction to all peers"""
-        message = {
-            "type": "transaction",
-            "data": transaction.to_dict()
-        }
-        
-        success = True
-        with self.peers_lock:
-            for peer in self.peers:
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(5)
-                    sock.connect(peer)
-                    sock.send(json.dumps(message).encode())
-                    sock.close()
-                except Exception as e:
-                    self.logger.error(f"Failed to broadcast transaction to {peer}: {str(e)}")
-                    success = False
-                    
-        return success
+        message = Message(
+            type="transaction",
+            payload={
+                "transaction": transaction.to_dict(),
+                "propagate": True
+            },
+            sender=self.node_id
+        )
+        asyncio.create_task(self._propagate_message(message))
 
-    def broadcast_block(self, block: Block) -> bool:
+    def broadcast_block(self, block: Block):
         """Broadcast block to all peers"""
-        message = {
-            "type": "block",
-            "data": block.to_dict()
-        }
+        message = Message(
+            type="block",
+            payload={
+                "block": block.to_dict(),
+                "propagate": True
+            },
+            sender=self.node_id
+        )
+        asyncio.create_task(self._propagate_message(message))
+
+    async def get_transaction_status(self, tx_id: str) -> Dict:
+        """Get transaction status and confirmations"""
+        try:
+            # Get block info for transaction
+            block_info = self.blockchain.get_transaction_block(tx_id)
+            if block_info:
+                confirmations = len(self.blockchain.chain) - block_info['height']
+                return {
+                    "status": "confirmed",
+                    "confirmations": confirmations,
+                    "block_height": block_info['height'],
+                    "block_hash": block_info['hash']
+                }
+            
+            # Check if transaction is in mempool
+            if any(tx.transaction_id == tx_id for tx in self.blockchain.mempool):
+                return {
+                    "status": "pending",
+                    "confirmations": 0
+                }
+            
+            return {
+                "status": "unknown",
+                "confirmations": 0
+            }
         
-        success = True
-        with self.peers_lock:
-            for peer in self.peers:
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(5)
-                    sock.connect(peer)
-                    sock.send(json.dumps(message).encode())
-                    sock.close()
-                except Exception as e:
-                    self.logger.error(f"Failed to broadcast block to {peer}: {str(e)}")
-                    success = False
-                    
-        return success                    
+        except Exception as e:
+            self.logger.error(f"Error getting transaction status: {str(e)}")
+            return {
+                "status": "error",
+                "confirmations": 0
+            }    
+
+    def get_node_info(self) -> Dict:
+        """Get node information"""
+        return {
+            "node_id": self.node_id,
+            "address": f"{self.host}:{self.port}",
+            "peers": len(self.peers),
+            "blockchain_height": len(self.blockchain.chain),
+            "uptime": time.time() - getattr(self, 'start_time', time.time()),
+            "running": self.running
+        }

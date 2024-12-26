@@ -45,6 +45,14 @@ class Wallet:
         """Generate new wallet with random private key"""
         return cls()
 
+    def sign_message(self, message: str) -> str:
+        """Sign a message using the wallet's private key"""
+        return self.signature_manager.sign_data(message)
+
+    def verify_message(self, message: str, signature: str) -> bool:
+        """Verify a message signature"""
+        return self.signature_manager.verify_data(message, signature)
+
     def get_balance(self) -> Decimal:
         """Get wallet balance"""
         if not self.blockchain:
@@ -59,19 +67,10 @@ class Wallet:
         data: Optional[Dict] = None
     ) -> Optional[Transaction]:
         """Create new transaction"""
-        if not self.blockchain:
+        # Verify sufficient balance if blockchain is available
+        if self.blockchain and self.get_balance() < amount:
             return None
             
-        # Check if we're the unspendable genesis address
-        if self.is_unspendable():
-            return None
-            
-        # Verify sufficient balance
-        balance = self.get_balance()
-        if balance < amount:
-            return None
-            
-        # Create transaction
         transaction = Transaction(
             sender=self.address,
             recipient=recipient,
@@ -82,7 +81,7 @@ class Wallet:
         )
         
         # Sign transaction
-        signature = self.signature_manager.sign_data(transaction.to_string())
+        signature = self.sign_message(transaction.to_string())
         transaction.set_signature(signature)
         
         self.transactions.append(transaction)
@@ -122,18 +121,6 @@ class Wallet:
             amount=unclaimed_rewards,
             transaction_type=TransactionType.CLAIM_REWARDS
         )
-
-    def is_unspendable(self) -> bool:
-        """Check if this is the unspendable genesis wallet"""
-        if not self.blockchain:
-            return False
-        return self.blockchain.is_unspendable_address(self.address)
-
-    def is_staking_wallet(self) -> bool:
-        """Check if this is the genesis staking wallet"""
-        if not self.blockchain:
-            return False
-        return self.blockchain.is_staking_address(self.address)
 
     def get_transaction_history(self) -> List[Transaction]:
         """Get wallet transaction history"""
@@ -240,6 +227,9 @@ class Wallet:
             "address": self.address,
             "balance": str(self.get_balance()),
             "transactions": len(self.transactions),
-            "is_staking": self.is_staking_wallet(),
-            "is_unspendable": self.is_unspendable()
+            "public_key": self.export_public_key()
         }
+
+    def __str__(self) -> str:
+        """String representation of wallet"""
+        return f"Wallet(address={self.address})"

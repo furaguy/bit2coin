@@ -2,9 +2,13 @@
 from typing import Dict, List, Optional
 from decimal import Decimal
 import time
+import logging
 from .validator import Validator
 from ..blockchain.block import Block
 from ..blockchain.transaction import Transaction, TransactionType
+
+logger = logging.getLogger(__name__)
+
 
 class ProofOfStake:
     def __init__(self):
@@ -22,6 +26,10 @@ class ProofOfStake:
         self.validator_last_block: Dict[str, int] = {}  # Last block proposed by validator
         self.active_validators: List[str] = []
 
+    def is_active_validator(self, address: str) -> bool:
+        """Check if address is an active validator"""
+        return address in self.active_validators    
+
     def add_validator(self, address: str, stake: Decimal) -> bool:
         """Add new validator"""
         if stake < self.min_stake:
@@ -38,7 +46,11 @@ class ProofOfStake:
         
         self.validators[address] = validator
         self.total_stake += stake
-        self.active_validators.append(address)
+        
+        if address not in self.active_validators:
+            self.active_validators.append(address)
+            logging.debug(f"Added validator {address} to active validators")
+            logging.debug(f"Current active validators: {self.active_validators}")
         return True
 
     def get_block_reward(self, block_height: int) -> Decimal:
@@ -51,12 +63,16 @@ class ProofOfStake:
 
     def select_validator(self, block_height: int) -> Optional[str]:
         """Select validator for next block"""
+        logging.debug(f"Selecting validator for height {block_height}")
+        logging.debug(f"Active validators: {self.active_validators}")
         if not self.active_validators:
+            logging.debug("No active validators available")
             return None
 
         # Simple round-robin selection for now
         # Could be enhanced with weighted random selection based on stake
         selected = self.active_validators[block_height % len(self.active_validators)]
+        logging.debug(f"Selected validator {selected} for height {block_height}")
         
         # Update last block height for validator
         self.validator_last_block[selected] = block_height
